@@ -1,0 +1,63 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_name: expiry-reminder-linux
+            asset_suffix: linux
+          - os: windows-latest
+            artifact_name: expiry-reminder-windows
+            asset_suffix: windows
+          - os: macos-latest
+            artifact_name: expiry-reminder-macos
+            asset_suffix: macos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install openpyxl xlrd pyinstaller
+
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --name expiry-reminder --windowed --onefile \
+            --icon=assets/icon.ico \
+            --add-data "assets:assets" \
+            --hidden-import modules \
+            --hidden-import modules.config \
+            --hidden-import modules.utils \
+            --hidden-import modules.widgets \
+            --hidden-import modules.history_panel \
+            --hidden-import modules.analysis_panel \
+            --hidden-import modules.file_ops \
+            --hidden-import modules.notify_panel \
+            --hidden-import modules.robot_sync \
+            expiry_reminder.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/
+          if-no-files-found: error

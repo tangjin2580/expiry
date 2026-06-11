@@ -6,16 +6,13 @@ echo ==========================================
 echo   Expiry Reminder - PyInstaller Builder
 echo ==========================================
 echo.
-echo NOTE: Put build.bat AND expiry_reminder.py
-echo       in the same folder, then run this.
-echo.
 
 echo [1/4] Installing dependencies...
 pip install openpyxl xlrd pyinstaller win10toast 2>nul
 
 echo.
 echo [2/4] Building single exe (please wait)...
-pyinstaller --name 九九到期提醒工具 --windowed --onefile --icon=1.ico --distpath %USERPROFILE%\Desktop --hidden-import robot_sync --hidden-import notify_panel --hidden-import history_panel --hidden-import analysis_panel --hidden-import file_ops --hidden-import widgets --hidden-import config --hidden-import utils expiry_reminder.py
+pyinstaller --name 九九到期提醒工具 --windowed --onefile --icon=assets/icon.ico --add-data "assets;assets" --hidden-import modules --hidden-import modules.config --hidden-import modules.utils --hidden-import modules.widgets --hidden-import modules.history_panel --hidden-import modules.analysis_panel --hidden-import modules.file_ops --hidden-import modules.notify_panel --hidden-import modules.robot_sync --distpath %USERPROFILE%\Desktop expiry_reminder.py
 
 echo.
 echo [3/4] Cleanup...

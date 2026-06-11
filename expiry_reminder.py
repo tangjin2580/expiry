@@ -17,15 +17,15 @@ for mod, pkg in (("openpyxl", "openpyxl"), ("xlrd", "xlrd")):
     except ImportError:
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
 
-from config import C, LIGHT_COLORS, DARK_COLORS, FONT_FAMILY, COL_MAP
-from widgets import FlatButton
-from utils import enable_debug, disable_debug, is_debug_on, log_trace, log_debug
+from modules.config import C, LIGHT_COLORS, DARK_COLORS, FONT_FAMILY, COL_MAP
+from modules.widgets import FlatButton
+from modules.utils import enable_debug, disable_debug, is_debug_on, log_trace, log_debug
 
-from history_panel import HistoryPanelMixin
-from analysis_panel import AnalysisPanelMixin
-from file_ops import FileOpsMixin
-from notify_panel import NotifyPanelMixin
-from robot_sync import RobotSyncMixin
+from modules.history_panel import HistoryPanelMixin
+from modules.analysis_panel import AnalysisPanelMixin
+from modules.file_ops import FileOpsMixin
+from modules.notify_panel import NotifyPanelMixin
+from modules.robot_sync import RobotSyncMixin
 
 
 class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, NotifyPanelMixin, RobotSyncMixin):
@@ -96,8 +96,8 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
         self._theme_registry.append((widget, bg, fg))
 
     def _set_app_icon(self):
-        """加载同目录下的 1.ico 作为应用图标。"""
-        ico_path = os.path.join(os.path.dirname(__file__), "1.ico")
+        """加载同目录下的 icon 作为应用图标。"""
+        ico_path = os.path.join(os.path.dirname(__file__), "assets", "icon.ico")
         if os.path.exists(ico_path):
             self.iconbitmap(ico_path)
 

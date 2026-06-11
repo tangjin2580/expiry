@@ -6,11 +6,12 @@
 import os
 import platform
 
-# 程序当前目录（非 CWD，取脚本所在目录）
-_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# 程序根目录（modules/ 的上一级）
+_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ASSETS_DIR = os.path.join(_ROOT_DIR, "assets")
 
 HISTORY_FILE = os.path.join(os.path.expanduser("~"), ".expiry_reminder_history.json")
-LOG_FILE = os.path.join(_APP_DIR, "expiry_reminder_debug.log")
+LOG_FILE = os.path.join(_ROOT_DIR, "expiry_reminder_debug.log")
 NOTIFY_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".expiry_reminder_notify.json")
 ROBOT_SYNC_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".expiry_reminder_robot_sync.json")
 

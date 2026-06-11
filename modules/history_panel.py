@@ -11,8 +11,8 @@ from tkinter import ttk, messagebox
 from collections import Counter
 from datetime import datetime, timedelta
 
-from config import C, HISTORY_FILE, FONT_FAMILY
-from utils import log_trace, log_debug
+from modules.config import C, HISTORY_FILE, FONT_FAMILY
+from modules.utils import log_trace, log_debug
 
 
 class HistoryPanelMixin:

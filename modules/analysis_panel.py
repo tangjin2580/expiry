@@ -10,9 +10,9 @@ from tkinter import ttk, messagebox
 from collections import defaultdict
 from datetime import datetime
 
-from config import C, FONT_FAMILY
-from widgets import FlatButton
-from utils import parse_date, check_expiry, _row_value, send_notify, log_error, log_trace, log_debug
+from modules.config import C, FONT_FAMILY
+from modules.widgets import FlatButton
+from modules.utils import parse_date, check_expiry, _row_value, send_notify, log_error, log_trace, log_debug
 
 
 class AnalysisPanelMixin:

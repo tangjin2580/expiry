@@ -4,7 +4,7 @@
 """
 
 import tkinter as tk
-from config import C, FONT_FAMILY
+from modules.config import C, FONT_FAMILY
 
 
 # ---------------------------------------------------------------

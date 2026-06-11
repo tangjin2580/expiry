@@ -10,9 +10,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
 
-from config import C, ROBOT_SYNC_CONFIG_FILE, FONT_FAMILY
-from utils import log_debug, log_trace
-from widgets import FlatButton
+from modules.config import C, ROBOT_SYNC_CONFIG_FILE, FONT_FAMILY
+from modules.utils import log_debug, log_trace
+from modules.widgets import FlatButton
 
 
 class RobotSyncMixin:
@@ -30,6 +30,8 @@ class RobotSyncMixin:
             "interval_minutes": 30,
             "advance_days": 7,
             "auto_start": False,
+            "at_mobiles": "",
+            "at_all": False,
         }
         if not os.path.exists(ROBOT_SYNC_CONFIG_FILE):
             return default
@@ -50,6 +52,8 @@ class RobotSyncMixin:
             "interval_minutes": self._rs_interval_var.get(),
             "advance_days": self._rs_days_var.get(),
             "auto_start": self._rs_auto_start_var.get(),
+            "at_mobiles": self._rs_at_mobiles_var.get().strip(),
+            "at_all": self._rs_at_all_var.get(),
         }
         try:
             with open(ROBOT_SYNC_CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -143,6 +147,18 @@ class RobotSyncMixin:
 
         self._rs_auto_start_var = tk.BooleanVar(value=cfg.get("auto_start", False))
         ttk.Checkbutton(sr1, text="启动时自动开启", variable=self._rs_auto_start_var,
+                        style="Flat.TCheckbutton").pack(side="left")
+
+        # @成员设置行
+        sr_at = tk.Frame(strategy_card, bg=C.surface)
+        sr_at.pack(fill="x", padx=16, pady=(0, 4))
+        tk.Label(sr_at, text="📞  @成员手机号", bg=C.surface, fg=C.text2,
+                 font=(FONT_FAMILY, 10)).pack(side="left", padx=(0, 4))
+        self._rs_at_mobiles_var = tk.StringVar(value=cfg.get("at_mobiles", ""))
+        ttk.Entry(sr_at, textvariable=self._rs_at_mobiles_var, style="Flat.TEntry",
+                  font=(FONT_FAMILY, 10)).pack(side="left", fill="x", expand=True, padx=(0, 12))
+        self._rs_at_all_var = tk.BooleanVar(value=cfg.get("at_all", False))
+        ttk.Checkbutton(sr_at, text="@所有人", variable=self._rs_at_all_var,
                         style="Flat.TCheckbutton").pack(side="left")
 
         # 按钮行
@@ -279,20 +295,42 @@ class RobotSyncMixin:
         except Exception as e:
             return False, str(e)
 
+    def _rs_parse_at_mobiles(self):
+        """解析手机号字符串为列表（逗号/空格分隔）。"""
+        raw = self._rs_at_mobiles_var.get().strip()
+        if not raw:
+            return []
+        return [p.strip() for p in raw.replace("，", ",").split(",") if p.strip()]
+
     def _rs_send_to_platform(self, platform, message, is_test=False):
         """发送到指定平台（在工作线程中）。"""
+        at_mobiles = self._rs_parse_at_mobiles()
+        at_all = self._rs_at_all_var.get()
+
         if platform == "dingtalk":
             url = self._rs_dingtalk_var.get().strip()
             if not url:
                 self.after(0, lambda: self._rs_log_result(platform, False, "未配置 Webhook 地址"))
                 return
             payload = {"msgtype": "text", "text": {"content": message}}
+            # 钉钉 @成员：atMobiles + isAtAll
+            if at_all:
+                payload["at"] = {"atMobiles": at_mobiles, "isAtAll": True}
+            elif at_mobiles:
+                payload["at"] = {"atMobiles": at_mobiles, "isAtAll": False}
         elif platform == "wechat":
             url = self._rs_wechat_var.get().strip()
             if not url:
                 self.after(0, lambda: self._rs_log_result(platform, False, "未配置 Webhook 地址"))
                 return
             payload = {"msgtype": "text", "text": {"content": message}}
+            # 企业微信 @成员：mentioned_mobile_list + mentioned_list
+            if at_all:
+                payload["text"]["mentioned_list"] = ["all"]
+                if at_mobiles:
+                    payload["text"]["mentioned_mobile_list"] = at_mobiles
+            elif at_mobiles:
+                payload["text"]["mentioned_mobile_list"] = at_mobiles
         else:
             return
 

@@ -19,8 +19,8 @@ try:
 except ImportError:
     xlrd = None
 
-from config import COL_MAP
-from utils import _row_value, detect_date_columns, detect_col_map, log_debug, log_error, log_trace, parse_date, clear_date_cache
+from modules.config import COL_MAP
+from modules.utils import _row_value, detect_date_columns, detect_col_map, log_debug, log_error, log_trace, parse_date, clear_date_cache
 
 
 class FileOpsMixin:

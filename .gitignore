@@ -26,5 +26,5 @@ Thumbs.db
 # 环境变量
 .env
 
-# Qoder 内部（不需要入仓库）
+# Qoder / IDE（保留 .vscode/settings.json）
 .qoder/

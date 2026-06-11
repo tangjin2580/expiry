@@ -10,9 +10,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
 
-from config import C, NOTIFY_CONFIG_FILE, FONT_FAMILY
-from utils import log_debug, log_trace
-from widgets import FlatButton
+from modules.config import C, NOTIFY_CONFIG_FILE, FONT_FAMILY
+from modules.utils import log_debug, log_trace
+from modules.widgets import FlatButton
 
 
 class NotifyPanelMixin:
@@ -29,6 +29,8 @@ class NotifyPanelMixin:
             "wechat_url": "",
             "interval_minutes": 30,
             "advance_days": 7,
+            "at_mobiles": "",
+            "at_all": False,
         }
         if not os.path.exists(NOTIFY_CONFIG_FILE):
             return default
@@ -48,6 +50,8 @@ class NotifyPanelMixin:
             "wechat_url": self._notify_wechat_var.get().strip(),
             "interval_minutes": self._notify_interval_var.get(),
             "advance_days": self._notify_days_var.get(),
+            "at_mobiles": self._notify_at_mobiles_var.get().strip(),
+            "at_all": self._notify_at_all_var.get(),
         }
         try:
             with open(NOTIFY_CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -120,6 +124,18 @@ class NotifyPanelMixin:
                   font=(FONT_FAMILY, 11)).pack(side="left", padx=(0, 4))
         tk.Label(r3, text="天", bg=C.surface, fg=C.text2,
                  font=(FONT_FAMILY, 10)).pack(side="left", padx=(0, 20))
+
+        # @成员设置行
+        r_at = tk.Frame(card, bg=C.surface)
+        r_at.pack(fill="x", padx=16, pady=(6, 14))
+        tk.Label(r_at, text="📞  @成员手机号", bg=C.surface, fg=C.text2,
+                 font=(FONT_FAMILY, 10)).pack(side="left", padx=(0, 4))
+        self._notify_at_mobiles_var = tk.StringVar(value=cfg.get("at_mobiles", ""))
+        ttk.Entry(r_at, textvariable=self._notify_at_mobiles_var, style="Flat.TEntry",
+                  font=(FONT_FAMILY, 10)).pack(side="left", fill="x", expand=True, padx=(0, 12))
+        self._notify_at_all_var = tk.BooleanVar(value=cfg.get("at_all", False))
+        ttk.Checkbutton(r_at, text="@所有人", variable=self._notify_at_all_var,
+                        style="Flat.TCheckbutton").pack(side="left")
 
         self._notify_save_btn = FlatButton(
             r3, "💾  保存配置", command=self._save_notify_config,
@@ -233,8 +249,18 @@ class NotifyPanelMixin:
         except Exception as e:
             return False, str(e)
 
+    def _parse_at_mobiles(self):
+        """解析手机号字符串为列表（逗号/空格分隔）。"""
+        raw = self._notify_at_mobiles_var.get().strip()
+        if not raw:
+            return []
+        return [p.strip() for p in raw.replace("，", ",").split(",") if p.strip()]
+
     def _send_to_platform(self, platform, message, is_test=False):
         """发送到指定平台（在工作线程中）。"""
+        at_mobiles = self._parse_at_mobiles()
+        at_all = self._notify_at_all_var.get()
+
         if platform == "dingtalk":
             url = self._notify_dingtalk_var.get().strip()
             if not url:
@@ -242,8 +268,13 @@ class NotifyPanelMixin:
                 return
             payload = {
                 "msgtype": "text",
-                "text": {"content": message}
+                "text": {"content": message},
             }
+            # 钉钉 @成员：atMobiles + isAtAll
+            if at_all:
+                payload["at"] = {"atMobiles": at_mobiles, "isAtAll": True}
+            elif at_mobiles:
+                payload["at"] = {"atMobiles": at_mobiles, "isAtAll": False}
         elif platform == "wechat":
             url = self._notify_wechat_var.get().strip()
             if not url:
@@ -251,8 +282,15 @@ class NotifyPanelMixin:
                 return
             payload = {
                 "msgtype": "text",
-                "text": {"content": message}
+                "text": {"content": message},
             }
+            # 企业微信 @成员：mentioned_mobile_list + mentioned_list
+            if at_all:
+                payload["text"]["mentioned_list"] = ["all"]
+                if at_mobiles:
+                    payload["text"]["mentioned_mobile_list"] = at_mobiles
+            elif at_mobiles:
+                payload["text"]["mentioned_mobile_list"] = at_mobiles
         else:
             return
 

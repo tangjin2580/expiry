@@ -7,7 +7,7 @@ import re
 import sys
 import logging
 from datetime import datetime, timedelta
-from config import DATE_FORMATS, LOG_FILE, COL_MAP, HEADER_PATTERNS
+from modules.config import DATE_FORMATS, LOG_FILE, COL_MAP, HEADER_PATTERNS
 
 # ---------------------------------------------------------------
 # 调试日志（默认关闭，enable_debug() 后开启）
