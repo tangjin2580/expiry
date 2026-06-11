@@ -1,0 +1,10 @@
+venv/
+venv_old/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+*.spec
+build/
+dist/
+.DS_Store
