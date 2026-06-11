@@ -15,13 +15,10 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact_name: expiry-reminder-linux
-            asset_suffix: linux
           - os: windows-latest
             artifact_name: expiry-reminder-windows
-            asset_suffix: windows
           - os: macos-latest
             artifact_name: expiry-reminder-macos
-            asset_suffix: macos
 
     steps:
       - name: Checkout
@@ -33,16 +30,61 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install openpyxl xlrd pyinstaller
+        run: pip install openpyxl xlrd pyinstaller Pillow
 
       - name: Install Linux deps
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y python3-tk
 
-      - name: Build with PyInstaller
+      - name: Convert icon for macOS
+        if: runner.os == 'macOS'
+        run: |
+          python3 -c "
+          from PIL import Image
+          img = Image.open('assets/icon.ico')
+          img.save('assets/icon.icns', format='ICNS')
+          print('ICNS icon created')
+          "
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
         run: |
           pyinstaller --name expiry-reminder --windowed --onefile \
             --icon=assets/icon.ico \
+            --add-data "assets:assets" \
+            --hidden-import modules \
+            --hidden-import modules.config \
+            --hidden-import modules.utils \
+            --hidden-import modules.widgets \
+            --hidden-import modules.history_panel \
+            --hidden-import modules.analysis_panel \
+            --hidden-import modules.file_ops \
+            --hidden-import modules.notify_panel \
+            --hidden-import modules.robot_sync \
+            expiry_reminder.py
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --name expiry-reminder --windowed --onefile `
+            --icon=assets/icon.ico `
+            --add-data "assets;assets" `
+            --hidden-import modules `
+            --hidden-import modules.config `
+            --hidden-import modules.utils `
+            --hidden-import modules.widgets `
+            --hidden-import modules.history_panel `
+            --hidden-import modules.analysis_panel `
+            --hidden-import modules.file_ops `
+            --hidden-import modules.notify_panel `
+            --hidden-import modules.robot_sync `
+            expiry_reminder.py
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --name expiry-reminder --windowed --onefile \
+            --icon=assets/icon.icns \
             --add-data "assets:assets" \
             --hidden-import modules \
             --hidden-import modules.config \
