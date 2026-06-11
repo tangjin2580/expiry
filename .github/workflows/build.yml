@@ -161,8 +161,8 @@ jobs:
             ---
             *Built by GitHub Actions*
           files: |
-            artifacts/expiry-reminder-linux/dist/*
-            artifacts/expiry-reminder-windows/dist/*
-            artifacts/expiry-reminder-macos/dist/*
+            artifacts/expiry-reminder-linux/**
+            artifacts/expiry-reminder-windows/**
+            artifacts/expiry-reminder-macos/**
           draft: false
           prerelease: false
