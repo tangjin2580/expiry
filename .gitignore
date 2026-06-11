@@ -1,10 +1,30 @@
+# Python
 venv/
 venv_old/
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+*.egg
+
+# 日志
 *.log
+
+# PyInstaller 构建产物
 *.spec
 build/
 dist/
+*.exe
+
+# 系统文件
 .DS_Store
+Thumbs.db
+*.bak
+*.tmp
+*~
+
+# 环境变量
+.env
+
+# Qoder 内部（不需要入仓库）
+.qoder/
