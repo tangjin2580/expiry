@@ -15,10 +15,16 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact_name: expiry-reminder-linux
+            suffix: linux
           - os: windows-latest
             artifact_name: expiry-reminder-windows
+            suffix: windows
           - os: macos-latest
             artifact_name: expiry-reminder-macos
+            suffix: macos
+
+    outputs:
+      version: ${{ steps.version.outputs.tag }}
 
     steps:
       - name: Checkout
@@ -62,6 +68,7 @@ jobs:
             --hidden-import modules.notify_panel \
             --hidden-import modules.robot_sync \
             expiry_reminder.py
+          mv dist/expiry-reminder dist/expiry-reminder-linux
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
@@ -79,6 +86,7 @@ jobs:
             --hidden-import modules.notify_panel `
             --hidden-import modules.robot_sync `
             expiry_reminder.py
+          ren dist\expiry-reminder.exe expiry-reminder-windows.exe
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
@@ -96,6 +104,7 @@ jobs:
             --hidden-import modules.notify_panel \
             --hidden-import modules.robot_sync \
             expiry_reminder.py
+          mv dist/expiry-reminder dist/expiry-reminder-macos
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -103,3 +112,57 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: dist/
           if-no-files-found: error
+
+      - name: Generate version
+        id: version
+        if: runner.os == 'Linux'
+        run: echo "tag=v5.4-$(date +%Y%m%d).${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: ls -laR artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.version }}
+          name: ${{ needs.build.outputs.version }}
+          body: |
+            ## 🔗 到期提醒工具 ${{ needs.build.outputs.version }}
+
+            自动构建于 ${{ github.event.repository.updated_at }}
+
+            ### 📥 下载
+            | 平台 | 文件 |
+            |------|------|
+            | 🪟 Windows | `expiry-reminder-windows.exe` |
+            | 🍎 macOS | `expiry-reminder-macos` |
+            | 🐧 Linux | `expiry-reminder-linux` |
+
+            ### ✨ 功能
+            - 📊 Excel 到期分析（聚合/明细视图）
+            - 🚚 送货记录管理
+            - 📋 历史快照对比
+            - 🤖 钉钉/企业微信机器人定时推送
+            - 🔗 机器人同步面板（Webhook 配置 + 消息预览）
+
+            ---
+            *Built by GitHub Actions*
+          files: |
+            artifacts/expiry-reminder-linux/dist/*
+            artifacts/expiry-reminder-windows/dist/*
+            artifacts/expiry-reminder-macos/dist/*
+          draft: false
+          prerelease: false
