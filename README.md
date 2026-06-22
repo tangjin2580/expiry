@@ -14,7 +14,7 @@
 
 ## 📸 截图
 
-![到期分析](https://via.placeholder.com/800x500/2563EB/white?text=%E5%88%B0%E6%9C%9F%E5%88%86%E6%9E%90)
+<img width="1922" height="1308" alt="image" src="https://github.com/user-attachments/assets/e7d153ba-8465-477d-82dd-996faac9fbd1" />
 
 ## 🏗 项目结构
 
@@ -116,3 +116,4 @@ MIT
 ---
 
 *Built by [tangjin2580](https://github.com/tangjin2580)*
+
