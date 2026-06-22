@@ -35,8 +35,14 @@ class HistoryPanelMixin:
 
     def _save_history_entries(self):
         try:
+            total = len(self._history_entries)
+            trimmed = self._history_entries[:80]
             with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-                json.dump(self._history_entries[:80], f, ensure_ascii=False, indent=2)
+                json.dump(trimmed, f, ensure_ascii=False, indent=2)
+            if total > 80:
+                discarded = total - 80
+                self.status_var.set(f"历史记录：保留最近 80 条，已清理 {discarded} 条旧记录")
+                log_debug(f"[HISTORY] 截断: 保留 80 条, 丢弃 {discarded} 条")
         except Exception as e:
             self.status_var.set(f"历史记录保存失败：{e}")
 

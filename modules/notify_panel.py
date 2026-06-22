@@ -402,6 +402,9 @@ class NotifyPanelMixin:
         """定时回调：发送通知 → 调度下一次。"""
         if not self._notify_schedule_running:
             return
+        # 自动重新分析（确保推送数据不是过期的）
+        if getattr(self, "_loaded_path", "") and not getattr(self, "_checking", False):
+            self._do_check()
         # 发送
         msg = self._build_notify_message()
         if msg is not None:
@@ -415,6 +418,7 @@ class NotifyPanelMixin:
                                  daemon=True).start()
         else:
             log_debug("[NOTIFY] 定时：无待提醒订单，跳过")
-        # 调度下一次
-        interval_ms = self._notify_interval_var.get() * 60 * 1000
+        # 调度下一次（最小间隔 1 分钟）
+        interval_min = max(1, self._notify_interval_var.get())
+        interval_ms = interval_min * 60 * 1000
         self._notify_schedule_id = self.after(interval_ms, self._schedule_tick)

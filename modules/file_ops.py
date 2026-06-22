@@ -6,6 +6,7 @@
 import os
 import sys
 import shutil
+import subprocess
 import threading
 import traceback
 from collections import Counter
@@ -80,9 +81,9 @@ class FileOpsMixin:
             if sys.platform.startswith("win"):
                 os.startfile(path)
             elif sys.platform == "darwin":
-                os.system(f'open "{path}"')
+                subprocess.run(["open", path], check=False)
             else:
-                os.system(f'xdg-open "{path}"')
+                subprocess.run(["xdg-open", path], check=False)
         except Exception as e:
             messagebox.showerror(err_title, str(e))
 
@@ -538,27 +539,34 @@ class FileOpsMixin:
         self._sync_button_states()
 
     def _export_shipping(self):
+        if not self._shipped_rows:
+            messagebox.showwarning("提示", "没有送货数据可导出"); return
         desktop = os.path.join(os.path.expanduser("~"), "Desktop")
         base = f"送货记录_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         fpath = self._unique_path(desktop, base, ".xlsx")
-        if not self._shipped_rows:
-            messagebox.showwarning("提示", "没有送货数据可导出"); return
-        wb = None
-        try:
-            wb = openpyxl.Workbook()
-            ws = wb.active; ws.title = "送货记录"
-            ws.append(["送货日期", "客户", "产品", "订单状态", "备注"])
-            for r in self._shipped_rows:
-                ws.append(list(r))
-            wb.save(fpath)
-            self.status_var.set(f"✅ 送货记录已导出到桌面：{os.path.basename(fpath)}")
-            messagebox.showinfo("导出成功", f"文件已保存到桌面：{os.path.basename(fpath)}")
-        except Exception as e:
-            messagebox.showerror("导出失败", str(e))
-        finally:
-            if wb is not None:
-                try: wb.close()
-                except Exception: pass
+        rows = list(self._shipped_rows)
+
+        def worker():
+            wb = None
+            try:
+                wb = openpyxl.Workbook()
+                ws = wb.active; ws.title = "送货记录"
+                ws.append(["送货日期", "客户", "产品", "订单状态", "备注"])
+                for r in rows:
+                    ws.append(list(r))
+                wb.save(fpath)
+                self.after(0, lambda: (
+                    self.status_var.set(f"✅ 送货记录已导出到桌面：{os.path.basename(fpath)}"),
+                    messagebox.showinfo("导出成功", f"文件已保存到桌面：{os.path.basename(fpath)}")
+                ))
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror("导出失败", str(e)))
+            finally:
+                if wb is not None:
+                    try: wb.close()
+                    except Exception: pass
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # -----------------------------------------------------------
     # 导出分析结果

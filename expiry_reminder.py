@@ -5,7 +5,35 @@
 入口文件 — 仅含 UI 构建 & 状态管理，业务逻辑分层在 Mixin 中。
 """
 
-import sys, os, subprocess
+import sys, os, subprocess, argparse
+# ── 修复 Python 3.13+ venv 找不到 tcl/tk 的问题 ──
+if not os.environ.get("TCL_LIBRARY"):
+    _py_dirs = set()
+    # venv: 从 pyvenv.cfg 读取系统 Python 路径
+    _cfg = os.path.join(os.path.dirname(sys.executable), "..", "pyvenv.cfg")
+    if os.path.isfile(_cfg):
+        try:
+            with open(_cfg, "r", encoding="utf-8") as _f:
+                for _line in _f:
+                    if _line.startswith("home"):
+                        _py_dirs.add(_line.split("=", 1)[1].strip())
+                        break
+        except Exception:
+            pass
+    # 也检查 sys.executable 自身所在目录
+    _py_dirs.add(os.path.dirname(sys.executable))
+    for _py_home in _py_dirs:
+        for _sub in ("tcl", "lib", "Lib"):
+            _tcl_dir = os.path.join(_py_home, _sub, "tcl8.6")
+            if os.path.isdir(_tcl_dir):
+                os.environ["TCL_LIBRARY"] = os.path.normpath(_tcl_dir)
+                _tk_dir = os.path.join(_py_home, _sub, "tk8.6")
+                if os.path.isdir(_tk_dir):
+                    os.environ["TK_LIBRARY"] = os.path.normpath(_tk_dir)
+                break
+        if os.environ.get("TCL_LIBRARY"):
+            break
+
 import tkinter as tk
 from tkinter import ttk
 from collections import Counter
@@ -18,6 +46,7 @@ for mod, pkg in (("openpyxl", "openpyxl"), ("xlrd", "xlrd")):
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"])
 
 from modules.config import C, LIGHT_COLORS, DARK_COLORS, FONT_FAMILY, COL_MAP
+from modules.config import get_autostart_enabled, set_autostart, APP_VERSION
 from modules.widgets import FlatButton
 from modules.utils import enable_debug, disable_debug, is_debug_on, log_trace, log_debug
 
@@ -26,9 +55,17 @@ from modules.analysis_panel import AnalysisPanelMixin
 from modules.file_ops import FileOpsMixin
 from modules.notify_panel import NotifyPanelMixin
 from modules.robot_sync import RobotSyncMixin
+from modules.update_panel import UpdatePanelMixin
+from modules.tray_handler import TrayHandler
+
+# ── 命令行参数 ──
+_parser = argparse.ArgumentParser(description="到期提醒工具")
+_parser.add_argument("--background", action="store_true",
+                     help="后台模式启动（最小化到系统托盘）")
+_ARGS = _parser.parse_args()
 
 
-class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, NotifyPanelMixin, RobotSyncMixin):
+class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, NotifyPanelMixin, RobotSyncMixin, UpdatePanelMixin):
     def __init__(self):
         super().__init__()
         self.title("到期提醒工具")
@@ -84,7 +121,35 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
         self._history_entries = self._load_history_entries()
         self._refresh_history_list()
         self._load_last_file()
+
+        # ---- 系统托盘 & 后台模式 ----
+        self._tray = TrayHandler(self)
+        self._tray.start()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # 后台模式：启动时隐藏窗口到托盘
+        if _ARGS.background:
+            self.withdraw()
+
+    # =========================================================
+    #  开机自启
+    # =========================================================
+
+    def _toggle_autostart(self):
+        """切换开机自启状态。"""
+        current = get_autostart_enabled()
+        try:
+            set_autostart(not current)
+            new_state = not current
+            if new_state:
+                self._autostart_btn.config(text="☑ 自启", fg="#16A34A")
+                self.status_var.set("✅ 开机自启已启用（后台模式启动）")
+            else:
+                self._autostart_btn.config(text="☐ 自启", fg=C.text2)
+                self.status_var.set("开机自启已关闭")
+        except Exception as e:
+            self.status_var.set(f"设置开机自启失败: {e}")
+            log_debug(f"[AUTOSTART] 切换失败: {e}")
 
     # =========================================================
     #  UI 构建
@@ -166,6 +231,13 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
                                     bg=C.bg, fg=C.accent, height=28, width=56, font=(FONT_FAMILY, 10))
         self._mode_btn.pack(side="left", padx=(6, 0))
 
+        # 开机自启开关
+        _as_text = "☑ 自启" if get_autostart_enabled() else "☐ 自启"
+        _as_fg = "#16A34A" if get_autostart_enabled() else C.text2
+        self._autostart_btn = FlatButton(r, _as_text, command=self._toggle_autostart,
+                                         bg=C.bg, fg=_as_fg, height=28, width=62, font=(FONT_FAMILY, 10))
+        self._autostart_btn.pack(side="left", padx=(6, 0))
+
     def _build_content(self):
         content = tk.Frame(self, bg=C.bg)
         content.pack(fill="both", expand=True, padx=16, pady=12)
@@ -202,16 +274,19 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
         self.history_tab = tk.Frame(self.notebook, bg=C.bg)
         self.notify_tab = tk.Frame(self.notebook, bg=C.bg)
         self.robot_sync_tab = tk.Frame(self.notebook, bg=C.bg)
+        self.update_tab = tk.Frame(self.notebook, bg=C.bg)
         self.notebook.add(self.analysis_tab, text="到期分析")
         self.notebook.add(self.shipping_tab, text="送货记录")
         self.notebook.add(self.history_tab, text="历史记录")
         self.notebook.add(self.notify_tab, text="机器人通知")
         self.notebook.add(self.robot_sync_tab, text="机器人同步")
+        self.notebook.add(self.update_tab, text="检查更新")
         self._build_analysis_tab()
         self._build_shipping_tab()
         self._build_history_tab()
         self._build_notify_tab()
         self._build_robot_sync_tab()
+        self._build_update_tab()
 
     def _build_analysis_tab(self):
         bar = tk.Frame(self.analysis_tab, bg=C.surface2, highlightbackground=C.border, highlightthickness=1)
@@ -420,7 +495,7 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
         self._sync_button_states()
 
         # 版本号用 place 放到主窗口右下角，不受 pack 布局挤压
-        self._version_lbl = tk.Label(self, text="v5.1", bg=C.bg, fg=C.accent,
+        self._version_lbl = tk.Label(self, text=f"v{APP_VERSION}", bg=C.bg, fg=C.accent,
                                      font=(FONT_FAMILY, 9), cursor="hand2")
         self._version_lbl.place(relx=1.0, rely=1.0, x=-12, y=-6, anchor="se")
         self._version_lbl.bind("<Button-1>", self._on_version_click)
@@ -439,16 +514,21 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
                 pass
 
     def _on_version_click(self, _event):
-        """点击版本号 5 次切换 DEBUG 日志开关。"""
+        """单击版本号切换到检查更新标签页；连续快速点击 5 次切换 DEBUG 日志开关。"""
         if self._debug_click_timer is not None:
             self.after_cancel(self._debug_click_timer)
         self._debug_click_count += 1
         if self._debug_click_count >= 5:
             self._debug_click_count = 0
+            self._debug_click_timer = None
             self._toggle_debug()
+        elif self._debug_click_count == 1:
+            # 首次点击：切换到检查更新标签页
+            self.notebook.select(self.update_tab)
+            # 继续监听后续点击（可能凑满 5 次触发 debug）
+            self._debug_click_timer = self.after(1500, self._reset_debug_clicks)
         else:
-            # 2 秒内未继续点击则重置计数
-            self._debug_click_timer = self.after(2000, self._reset_debug_clicks)
+            self._debug_click_timer = self.after(1500, self._reset_debug_clicks)
 
     def _reset_debug_clicks(self):
         self._debug_click_count = 0
@@ -457,12 +537,12 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
     def _toggle_debug(self):
         if is_debug_on():
             disable_debug()
-            self._version_lbl.config(text="v5.1", fg=C.accent)
+            self._version_lbl.config(text=f"v{APP_VERSION}", fg=C.accent)
             self.status_var.set("DEBUG 日志已关闭")
         else:
             enable_debug()
-            self._version_lbl.config(text="v5.1 [DEBUG]", fg="#DC2626")
-            from config import LOG_FILE
+            self._version_lbl.config(text=f"v{APP_VERSION} [DEBUG]", fg="#DC2626")
+            from modules.config import LOG_FILE
             self.status_var.set("🔍 DEBUG 日志已开启 → " + LOG_FILE)
 
     # =========================================================
@@ -490,127 +570,56 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
         self._apply_mode()
 
     def _apply_mode(self):
-        import traceback, time as _time
-        _t0 = _time.time()
         is_simple = self._mode == "simple"
-        log_trace(f"[MODE] _apply_mode 开始 is_simple={is_simple} mode_btn_text={self._mode_btn._text!r}")
+        log_trace(f"[MODE] apply: {'simple' if is_simple else 'advanced'}")
 
-        # ---- 诊断：记录操作前各 widget 的 pack 状态 ----
-        def _widget_state(w):
-            try:
-                mgr = w.winfo_manager()
-                mapped = w.winfo_ismapped()
-                return f"mgr={mgr} mapped={mapped}"
-            except Exception:
-                return "mgr=? mapped=?"
+        self._mode_btn.config(text="高级" if is_simple else "简洁",
+                              fg=C.accent if is_simple else C.text)
+
+        def _hide(w):
+            try: w.pack_forget()
+            except Exception: pass
+
+        def _show(w, **kw):
+            try: w.pack(**kw)
+            except Exception: pass
 
         try:
-            self._mode_btn.config(text="高级" if is_simple else "简洁",
-                                  fg=C.accent if is_simple else C.text)
-            log_trace(f"  [BTN] config done → text={self._mode_btn._text!r} fg={self._mode_btn._fg!r}")
-
-            def _hide(name, w):
-                st_before = _widget_state(w)
-                try:
-                    w.pack_forget()
-                    st_after = _widget_state(w)
-                    log_trace(f"  [hide] {name} before=({st_before}) after=({st_after})")
-                except Exception as e:
-                    log_trace(f"  [hide] {name} 失败: {e!r}\n{traceback.format_exc()}")
-
-            def _show(name, w, **kw):
-                st_before = _widget_state(w)
-                try:
-                    w.pack(**kw)
-                    st_after = _widget_state(w)
-                    log_trace(f"  [show] {name} before=({st_before}) after=({st_after}) kw={kw}")
-                except Exception as e:
-                    log_trace(f"  [show] {name} 失败: {e!r}\n{traceback.format_exc()}")
-
-            nb_tabs_before = [self.notebook.tab(i, "text") for i in range(self.notebook.index("end"))]
-            log_trace(f"  [NB] tabs before={nb_tabs_before}")
-
             if is_simple:
-                log_trace("[MODE] >>> 切换到简洁模式")
-                _hide("open_folder_btn", self.open_folder_btn)
-                _hide("open_in_excel_btn", self.open_in_excel_btn)
-                for i, f in enumerate(self._hint_frames):
-                    _hide(f"hint_frame[{i}]", f)
-                _hide("_pending_frame", self._pending_frame)
-                _hide("_compare_lbl", self._compare_lbl)
-                _hide("edit_status_btn", self.edit_status_btn)
-                _hide("expand_btn", self.expand_btn)
-                _hide("collapse_btn", self.collapse_btn)
-                _hide("fail_btn", self.fail_btn)
-                _hide("bottom_export_btn", self.bottom_export_btn)
-                try:
-                    self.notebook.hide(self.shipping_tab)
-                    log_trace("  [hide] shipping_tab OK")
-                except Exception as e:
-                    log_trace(f"  [hide] shipping_tab 失败: {e!r}\n{traceback.format_exc()}")
-                try:
-                    self.notebook.hide(self.history_tab)
-                    log_trace("  [hide] history_tab OK")
-                except Exception as e:
-                    log_trace(f"  [hide] history_tab 失败: {e!r}\n{traceback.format_exc()}")
-                try:
-                    self.notebook.hide(self.notify_tab)
-                    log_trace("  [hide] notify_tab OK")
-                except Exception as e:
-                    log_trace(f"  [hide] notify_tab 失败: {e!r}\n{traceback.format_exc()}")
-                try:
-                    self.notebook.hide(self.robot_sync_tab)
-                    log_trace("  [hide] robot_sync_tab OK")
-                except Exception as e:
-                    log_trace(f"  [hide] robot_sync_tab 失败: {e!r}\n{traceback.format_exc()}")
+                _hide(self.open_folder_btn)
+                _hide(self.open_in_excel_btn)
+                for f in self._hint_frames:
+                    _hide(f)
+                _hide(self._pending_frame)
+                _hide(self._compare_lbl)
+                _hide(self.edit_status_btn)
+                _hide(self.expand_btn)
+                _hide(self.collapse_btn)
+                _hide(self.fail_btn)
+                _hide(self.bottom_export_btn)
+                for tab in (self.shipping_tab, self.history_tab, self.notify_tab, self.robot_sync_tab):
+                    try: self.notebook.hide(tab)
+                    except Exception: pass
                 self.view_mode_var.set("明细")
             else:
-                log_trace("[MODE] >>> 切换到高级模式")
-                _show("open_folder_btn", self.open_folder_btn, side="left", padx=(8, 0))
-                _show("open_in_excel_btn", self.open_in_excel_btn, side="left", padx=(8, 0))
+                _show(self.open_folder_btn, side="left", padx=(8, 0))
+                _show(self.open_in_excel_btn, side="left", padx=(8, 0))
                 for i, f in enumerate(self._hint_frames):
-                    _show(f"hint_frame[{i}]", f, fill="x", pady=(0, 2) if i == 0 else (0, 6))
-                _show("_pending_frame", self._pending_frame, side="left", padx=(0, 10))
-                _show("_compare_lbl", self._compare_lbl, side="right", padx=(0, 8))
-                _show("edit_status_btn", self.edit_status_btn, side="left", padx=(8, 0))
-                _show("expand_btn", self.expand_btn, side="left", padx=(8, 0))
-                _show("collapse_btn", self.collapse_btn, side="left", padx=(8, 0))
-                _show("fail_btn", self.fail_btn, side="left", padx=(8, 0))
-                _show("bottom_export_btn", self.bottom_export_btn, side="right", padx=16, pady=6)
-                try:
-                    self.notebook.add(self.shipping_tab, text="送货记录")
-                    log_trace("  [show] shipping_tab OK")
-                except Exception as e:
-                    log_trace(f"  [show] shipping_tab 失败: {e!r}\n{traceback.format_exc()}")
-                try:
-                    self.notebook.add(self.history_tab, text="历史记录")
-                    log_trace("  [show] history_tab OK")
-                except Exception as e:
-                    log_trace(f"  [show] history_tab 失败: {e!r}\n{traceback.format_exc()}")
-                try:
-                    self.notebook.add(self.notify_tab, text="机器人通知")
-                    log_trace("  [show] notify_tab OK")
-                except Exception as e:
-                    log_trace(f"  [show] notify_tab 失败: {e!r}\n{traceback.format_exc()}")
-                try:
-                    self.notebook.add(self.robot_sync_tab, text="机器人同步")
-                    log_trace("  [show] robot_sync_tab OK")
-                except Exception as e:
-                    log_trace(f"  [show] robot_sync_tab 失败: {e!r}\n{traceback.format_exc()}")
+                    _show(f, fill="x", pady=(0, 2) if i == 0 else (0, 6))
+                _show(self._pending_frame, side="left", padx=(0, 10))
+                _show(self._compare_lbl, side="right", padx=(0, 8))
+                _show(self.edit_status_btn, side="left", padx=(8, 0))
+                _show(self.expand_btn, side="left", padx=(8, 0))
+                _show(self.collapse_btn, side="left", padx=(8, 0))
+                _show(self.fail_btn, side="left", padx=(8, 0))
+                _show(self.bottom_export_btn, side="right", padx=16, pady=6)
+                for tab, text in ((self.shipping_tab, "送货记录"), (self.history_tab, "历史记录"),
+                                  (self.notify_tab, "机器人通知"), (self.robot_sync_tab, "机器人同步")):
+                    try: self.notebook.add(tab, text=text)
+                    except Exception: pass
                 self.view_mode_var.set("聚合")
-
-            # ---- 诊断：操作后验证 ----
-            nb_tabs_after = [self.notebook.tab(i, "text") for i in range(self.notebook.index("end"))]
-            log_trace(f"  [NB] tabs after={nb_tabs_after}")
-            # 抽检几个关键控件的最终状态
-            for name, w in [("open_folder_btn", self.open_folder_btn),
-                            ("bottom_export_btn", self.bottom_export_btn),
-                            ("edit_status_btn", self.edit_status_btn)]:
-                log_trace(f"  [FINAL] {name} {_widget_state(w)}")
-            log_trace(f"  [FINAL] view_mode_var={self.view_mode_var.get()!r}")
-            log_trace(f"[MODE] _apply_mode 完成 (耗时 {_time.time() - _t0:.3f}s)")
         except Exception as e:
-            log_trace(f"[MODE] _apply_mode 顶层异常: {e!r}\n{traceback.format_exc()}")
+            log_trace(f"[MODE] _apply_mode 异常: {e!r}")
         finally:
             self._sync_button_states()
 
@@ -637,6 +646,8 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
         # ── 1b. 非 FlatButton 单独配置 ──
         self._theme_btn.config(text="☀️" if is_dark else "🌙", bg=C.bg, fg=C.text)
         self._mode_btn.config(bg=C.bg, fg=C.accent if self._mode == "simple" else C.text)
+        _as_active = get_autostart_enabled()
+        self._autostart_btn.config(bg=C.bg, fg="#16A34A" if _as_active else C.text2)
         self._version_lbl.config(bg=C.bg)
         if not is_debug_on():
             self._version_lbl.config(fg=C.accent)
@@ -657,6 +668,9 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
         for btn in (self._rs_dingtalk_test_btn, self._rs_wechat_test_btn,
                     self._rs_save_btn, self._rs_preview_btn, self._rs_send_now_btn,
                     self._rs_toggle_btn, self._rs_clear_log_btn):
+            btn.draw()
+        # 检查更新面板按钮重绘
+        for btn in (self._up_github_btn, self._up_check_btn, self._up_download_btn):
             btn.draw()
 
         # ── 3. 注册表覆盖特定角色 ──
@@ -841,8 +855,8 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
         if st: parts.append(f"即将{st}")
         return " / ".join(parts) if parts else "正常"
 
-    def _on_close(self):
-        """窗口关闭时停止所有定时提醒。"""
+    def _stop_all_schedules(self):
+        """停止所有定时推送任务。"""
         if getattr(self, "_notify_schedule_running", False):
             self._notify_schedule_running = False
             if self._notify_schedule_id is not None:
@@ -851,7 +865,20 @@ class ExpiryApp(tk.Tk, HistoryPanelMixin, AnalysisPanelMixin, FileOpsMixin, Noti
             self._rs_schedule_running = False
             if self._rs_schedule_id is not None:
                 self.after_cancel(self._rs_schedule_id)
-        self.destroy()
+
+    def _on_close(self):
+        """窗口关闭时：如果有托盘则最小化到托盘，否则正常退出。"""
+        # 真正退出或无托盘时，停止定时任务
+        is_real_quit = (hasattr(self, "_tray") and self._tray.force_close) or \
+                       (not hasattr(self, "_tray") or self._tray._icon is None)
+        if is_real_quit:
+            self._stop_all_schedules()
+
+        # 委托给 TrayHandler 处理（隐藏到托盘 或 真正退出）
+        if hasattr(self, "_tray"):
+            self._tray.on_close()
+        else:
+            self.destroy()
 
 
 if __name__ == "__main__":

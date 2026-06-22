@@ -490,6 +490,9 @@ class RobotSyncMixin:
         """定时回调：发送通知 → 调度下一次。"""
         if not self._rs_schedule_running:
             return
+        # 自动重新分析（确保推送数据不是过期的）
+        if getattr(self, "_loaded_path", "") and not getattr(self, "_checking", False):
+            self._do_check()
         msg = self._rs_build_message()
         if msg is not None:
             dingtalk_url = self._rs_dingtalk_var.get().strip()
@@ -502,7 +505,9 @@ class RobotSyncMixin:
                                  daemon=True).start()
         else:
             log_debug("[SYNC] 定时：无待提醒订单，跳过")
-        interval_ms = self._rs_interval_var.get() * 60 * 1000
+        # 调度下一次（最小间隔 1 分钟）
+        interval_min = max(1, self._rs_interval_var.get())
+        interval_ms = interval_min * 60 * 1000
         self._rs_schedule_id = self.after(interval_ms, self._rs_schedule_tick)
 
     def _rs_auto_start(self):

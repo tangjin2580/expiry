@@ -36,7 +36,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install openpyxl xlrd pyinstaller Pillow
+        run: pip install openpyxl xlrd pyinstaller Pillow pystray
 
       - name: Install Linux deps
         if: runner.os == 'Linux'
@@ -58,6 +58,7 @@ jobs:
           pyinstaller --name expiry-reminder --windowed --onefile \
             --icon=assets/icon.ico \
             --add-data "assets:assets" \
+            --add-data "README.md:." \
             --hidden-import modules \
             --hidden-import modules.config \
             --hidden-import modules.utils \
@@ -67,6 +68,8 @@ jobs:
             --hidden-import modules.file_ops \
             --hidden-import modules.notify_panel \
             --hidden-import modules.robot_sync \
+            --hidden-import modules.tray_handler \
+            --hidden-import modules.update_panel \
             expiry_reminder.py
           mv dist/expiry-reminder dist/expiry-reminder-linux
 
@@ -76,6 +79,7 @@ jobs:
           pyinstaller --name expiry-reminder --windowed --onefile `
             --icon=assets/icon.ico `
             --add-data "assets;assets" `
+            --add-data "README.md;." `
             --hidden-import modules `
             --hidden-import modules.config `
             --hidden-import modules.utils `
@@ -85,6 +89,8 @@ jobs:
             --hidden-import modules.file_ops `
             --hidden-import modules.notify_panel `
             --hidden-import modules.robot_sync `
+            --hidden-import modules.tray_handler `
+            --hidden-import modules.update_panel `
             expiry_reminder.py
           ren dist\expiry-reminder.exe expiry-reminder-windows.exe
 
@@ -94,6 +100,7 @@ jobs:
           pyinstaller --name expiry-reminder --windowed --onefile \
             --icon=assets/icon.icns \
             --add-data "assets:assets" \
+            --add-data "README.md:." \
             --hidden-import modules \
             --hidden-import modules.config \
             --hidden-import modules.utils \
@@ -103,6 +110,8 @@ jobs:
             --hidden-import modules.file_ops \
             --hidden-import modules.notify_panel \
             --hidden-import modules.robot_sync \
+            --hidden-import modules.tray_handler \
+            --hidden-import modules.update_panel \
             expiry_reminder.py
           mv dist/expiry-reminder dist/expiry-reminder-macos
 
@@ -157,6 +166,9 @@ jobs:
             - 📋 历史快照对比
             - 🤖 钉钉/企业微信机器人定时推送
             - 🔗 机器人同步面板（Webhook 配置 + 消息预览）
+            - 🖥️ 后台模式（--background 启动，最小化到系统托盘）
+            - ⚡ 开机自启（UI 内一键开关）
+            - 🔄 检查更新 & 关于页面（版本号单击 / 托盘菜单打开）
 
             ---
             *Built by GitHub Actions*

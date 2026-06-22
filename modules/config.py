@@ -4,6 +4,7 @@
 """
 
 import os
+import sys
 import platform
 
 # 程序根目录（modules/ 的上一级）
@@ -14,6 +15,57 @@ HISTORY_FILE = os.path.join(os.path.expanduser("~"), ".expiry_reminder_history.j
 LOG_FILE = os.path.join(_ROOT_DIR, "expiry_reminder_debug.log")
 NOTIFY_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".expiry_reminder_notify.json")
 ROBOT_SYNC_CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".expiry_reminder_robot_sync.json")
+
+# 版本 & 更新
+APP_VERSION = "5.1"
+GITHUB_REPO = "tangjin2580/expiry"
+GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+
+def check_for_updates():
+    """
+    检查 GitHub 最新版本。
+    返回 dict: {"has_update": bool, "latest": str, "current": str, "url": str, "body": str}
+    网络失败时返回 {"error": str}。
+    """
+    import urllib.request
+    import json as _json
+    try:
+        req = urllib.request.Request(
+            GITHUB_API_LATEST,
+            headers={"Accept": "application/vnd.github.v3+json",
+                     "User-Agent": f"ExpiryReminder/{APP_VERSION}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+
+        latest_tag = data.get("tag_name", "").lstrip("v")
+        latest_name = data.get("name", latest_tag)
+        html_url = data.get("html_url", "")
+        body = data.get("body", "")
+
+        # 提取版本号的主要数字部分用于比较
+        def _ver_key(v):
+            parts = []
+            for seg in v.split("-")[0].split("."):
+                try:
+                    parts.append(int(seg))
+                except ValueError:
+                    break
+            return tuple(parts) if parts else (0,)
+
+        has_update = _ver_key(latest_tag) > _ver_key(APP_VERSION)
+
+        return {
+            "has_update": has_update,
+            "latest": latest_name or latest_tag,
+            "latest_tag": latest_tag,
+            "current": APP_VERSION,
+            "url": html_url,
+            "body": body[:500],
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 # 跨平台字体
 FONT_FAMILY = "Segoe UI" if platform.system() == "Windows" else (".AppleSystemUIFont" if platform.system() == "Darwin" else "Sans")
@@ -93,6 +145,57 @@ COL_MAP = {
     "quantity": 6,       # 数量
     "note": 10,          # 备注
 }
+
+# ---------------------------------------------------------------
+# 开机自启（Windows 注册表）
+# ---------------------------------------------------------------
+
+_REGISTRY_RUN_KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+_REGISTRY_APP_NAME = "ExpiryReminder"
+
+
+def get_exe_path():
+    """获取当前可执行文件路径（兼容 PyInstaller 打包和脚本直接运行）。"""
+    if getattr(sys, "frozen", False):
+        return sys.executable
+    return os.path.abspath(sys.argv[0])
+
+
+def get_autostart_enabled():
+    """检查开机自启是否已启用。"""
+    if platform.system() != "Windows":
+        return False
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REGISTRY_RUN_KEY,
+                             0, winreg.KEY_READ)
+        value, _ = winreg.QueryValueEx(key, _REGISTRY_APP_NAME)
+        winreg.CloseKey(key)
+        return bool(value)
+    except Exception:
+        return False
+
+
+def set_autostart(enabled):
+    """设置或取消开机自启。启用时以 --background 后台模式启动。"""
+    if platform.system() != "Windows":
+        return
+    import winreg
+    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REGISTRY_RUN_KEY,
+                         0, winreg.KEY_SET_VALUE)
+    if enabled:
+        exe = get_exe_path()
+        if getattr(sys, "frozen", False):
+            cmd = f'"{exe}" --background'
+        else:
+            cmd = f'"{sys.executable}" "{exe}" --background'
+        winreg.SetValueEx(key, _REGISTRY_APP_NAME, 0, winreg.REG_SZ, cmd)
+    else:
+        try:
+            winreg.DeleteValue(key, _REGISTRY_APP_NAME)
+        except FileNotFoundError:
+            pass
+    winreg.CloseKey(key)
 
 # 表头关键词匹配（用于自动检测列位置，关键词越靠前优先级越高）
 HEADER_PATTERNS = {
