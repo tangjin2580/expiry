@@ -27,10 +27,6 @@ from modules.utils import _row_value, detect_date_columns, detect_col_map, log_d
 class FileOpsMixin:
     """文件浏览、加载、写回 Excel、导出、送货。"""
 
-    # -----------------------------------------------------------
-    # 文件
-    # -----------------------------------------------------------
-
     def _open_file(self):
         log_trace("[FILE] _open_file 调用")
         path = filedialog.askopenfilename(
@@ -115,7 +111,6 @@ class FileOpsMixin:
         if self._loading:
             log_trace("[LOAD] _load_workbook 跳过: _loading=True")
             return
-        # ── 保存当前日期列的列号标识（1-based，跨加载稳定） ──
         saved_date_col_key = None
         if keep_date_col and self._date_cols:
             idx = self.date_col_cb.current()
@@ -131,113 +126,123 @@ class FileOpsMixin:
             wb = None
             try:
                 clear_date_cache()
-                ext = os.path.splitext(path)[1].lower()
-                if ext in (".xls", ".xlt"):
-                    if xlrd is None:
-                        raise ImportError("缺少 xlrd 库，无法读取 .xls 文件。请安装：pip install xlrd")
-                    wb = xlrd.open_workbook(path)
-                    ws = wb.sheet_by_index(0)
-                    headers = tuple(ws.cell_value(0, c) for c in range(ws.ncols))
-                    data_rows = []
-                    for row_num in range(1, ws.nrows):
-                        row = tuple(ws.cell_value(row_num, c) for c in range(ws.ncols))
-                        if any(v not in (None, "", 0) for v in row):
-                            data_rows.append({"excel_row": row_num + 1, "values": row})
-                else:
-                    wb = openpyxl.load_workbook(path, data_only=True)
-                    ws = wb[wb.sheetnames[0]]
-                    row_iter = ws.iter_rows(values_only=True)
-                    headers = tuple(next(row_iter, ()))
-                    data_rows = []
-                    for row_num, row in enumerate(row_iter, start=2):
-                        row = tuple(row)
-                        if any(v not in (None, "") for v in row):
-                            data_rows.append({"excel_row": row_num, "values": row})
+                headers, data_rows = self._read_excel_data(path)
                 log_debug(f"[LOAD] 读取完成: headers={headers}")
                 date_cols = detect_date_columns(headers, [r["values"] for r in data_rows])
                 log_debug(f"[LOAD] 数据行数: {len(data_rows)}, 日期列: {len(date_cols)} 个")
+                ext = os.path.splitext(path)[1].lower()
                 items = [f"{openpyxl.utils.get_column_letter(c['col']) if ext not in ('.xls', '.xlt') else '列'+str(c['col'])}  {c['header']}  ({c['ok']}/{c['total']})" for c in date_cols]
-
-                def update():
-                    self.path_var.set(path)
-                    self._loaded_path = path
-                    self._sheet_headers = headers
-                    self._sheet_rows = data_rows
-                    self._col_map = detect_col_map(headers)
-                    log_debug(f"[LOAD] update: _loaded_path={self._loaded_path}, rows={len(data_rows)}, col_map={self._col_map}")
-                    self._result_rows = []
-                    self._result_detail_rows = []
-                    self._failed_rows = []
-                    self._skip_info = {}
-                    self._shipped_rows = []
-                    self._cached_full_tree_data = None  # 清除树缓存
-                    self._date_cols = date_cols
-                    self.date_col_cb["values"] = items
-                    if items:
-                        restored = False
-                        if saved_date_col_key is not None:
-                            for i, dc in enumerate(date_cols):
-                                if dc["col"] == saved_date_col_key:
-                                    self._suppress_date_col_change = True
-                                    self.date_col_cb.current(i)
-                                    self._suppress_date_col_change = False
-                                    self.hint_var.set(f"✅ 自动检测 {len(items)} 个日期列，已恢复选择")
-                                    log_debug(f"[LOAD] 已恢复日期列: col={saved_date_col_key} → idx={i}")
-                                    restored = True
-                                    break
-                        if not restored:
-                            self._suppress_date_col_change = True
-                            self.date_col_cb.current(0)
-                            self._suppress_date_col_change = False
-                            self.hint_var.set(f"✅ 自动检测 {len(items)} 个日期列，已选第 1 个")
-                    else:
-                        self.date_col_cb.set("")
-                        self.hint_var.set("⚠️ 未检测到日期列")
-                    self.compare_var.set("历史对比：暂无")
-                    self.tv.delete(*self.tv.get_children())
-                    self.status_var.set(f"已加载：{os.path.basename(path)}  共 {len(data_rows)} 条数据")
-                    self._loading = False
-                    self._sync_button_states()
-                    self._refresh_shipping_tab()
-                    log_debug("[LOAD] update 完成")
-                    if run_analysis:
-                        log_debug("[LOAD] 调用 _run_analysis")
-                        self._run_analysis(show_dialog=False)
-                self.after(0, update)
+                self.after(0, lambda: self._on_load_success(path, data_rows, headers, date_cols, items, saved_date_col_key, run_analysis))
             except Exception as e:
                 log_error(f"[LOAD] _load_workbook 异常: {e}")
                 log_error(traceback.format_exc())
-                def show_error():
-                    self._loaded_path = ""
-                    self._sheet_headers = ()
-                    self._sheet_rows = []
-                    self._result_rows = []
-                    self._result_detail_rows = []
-                    self._failed_rows = []
-                    self._skip_info = {}
-                    self._shipped_rows = []
-                    self._date_cols = []
-                    self._col_map = dict(COL_MAP)
-                    self.date_col_cb["values"] = []
-                    self.date_col_cb.set("")
-                    self._loading = False
-                    self.hint_var.set("文件加载失败")
-                    self.status_var.set("打开文件失败")
-                    self._sync_button_states()
-                    msg = str(e)
-                    if "locked" in msg.lower() or "permission" in msg.lower():
-                        msg = "文件已被其他程序打开，请先关闭后再试"
-                    elif "invalid" in msg.lower() or "corrupt" in msg.lower():
-                        msg = "文件格式损坏，不是有效的 Excel 文件"
-                    elif "not a zip" in msg.lower():
-                        msg = "文件不是有效的 Excel 格式（.xlsx/.xlsm），请确认文件完整"
-                    self._show_analysis_failure(f"无法打开文件：{msg}")
-                self.after(0, show_error)
+                self.after(0, lambda: self._on_load_error(e))
             finally:
                 if wb is not None:
                     try: wb.close()
                     except Exception: pass
+
+        def patch_update():
+            pass
         threading.Thread(target=worker, daemon=True).start()
+
+    def _read_excel_data(self, path):
+        """读取 Excel 数据，返回 (headers, data_rows)。"""
+        ext = os.path.splitext(path)[1].lower()
+        if ext in (".xls", ".xlt"):
+            if xlrd is None:
+                raise ImportError("缺少 xlrd 库，无法读取 .xls 文件。请安装：pip install xlrd")
+            wb = xlrd.open_workbook(path)
+            ws = wb.sheet_by_index(0)
+            headers = tuple(ws.cell_value(0, c) for c in range(ws.ncols))
+            data_rows = []
+            for row_num in range(1, ws.nrows):
+                row = tuple(ws.cell_value(row_num, c) for c in range(ws.ncols))
+                if any(v not in (None, "", 0) for v in row):
+                    data_rows.append({"excel_row": row_num + 1, "values": row})
+        else:
+            wb = openpyxl.load_workbook(path, data_only=True)
+            ws = wb[wb.sheetnames[0]]
+            row_iter = ws.iter_rows(values_only=True)
+            headers = tuple(next(row_iter, ()))
+            data_rows = []
+            for row_num, row in enumerate(row_iter, start=2):
+                row = tuple(row)
+                if any(v not in (None, "") for v in row):
+                    data_rows.append({"excel_row": row_num, "values": row})
+        return headers, data_rows
+
+    def _on_load_success(self, path, data_rows, headers, date_cols, items, saved_date_col_key, run_analysis):
+        self.path_var.set(path)
+        self._loaded_path = path
+        self._sheet_headers = headers
+        self._sheet_rows = data_rows
+        self._col_map = detect_col_map(headers)
+        log_debug(f"[LOAD] update: _loaded_path={self._loaded_path}, rows={len(data_rows)}, col_map={self._col_map}")
+        self._result_rows = []
+        self._result_detail_rows = []
+        self._failed_rows = []
+        self._skip_info = {}
+        self._shipped_rows = []
+        self._cached_full_tree_data = None
+        self._date_cols = date_cols
+        self.date_col_cb["values"] = items
+        if items:
+            restored = False
+            if saved_date_col_key is not None:
+                for i, dc in enumerate(date_cols):
+                    if dc["col"] == saved_date_col_key:
+                        self._suppress_date_col_change = True
+                        self.date_col_cb.current(i)
+                        self._suppress_date_col_change = False
+                        self.hint_var.set(f"已恢复选择")
+                        log_debug(f"[LOAD] 已恢复日期列: col={saved_date_col_key} → idx={i}")
+                        restored = True
+                        break
+            if not restored:
+                self._suppress_date_col_change = True
+                self.date_col_cb.current(0)
+                self._suppress_date_col_change = False
+                self.hint_var.set(f"自动检测 {len(items)} 个日期列，已选第 1 个")
+        else:
+            self.date_col_cb.set("")
+            self.hint_var.set("未检测到日期列")
+        self.compare_var.set("历史对比：暂无")
+        self.tv.delete(*self.tv.get_children())
+        self.status_var.set(f"已加载：{os.path.basename(path)}  共 {len(data_rows)} 条数据")
+        self._loading = False
+        self._sync_button_states()
+        self._refresh_shipping_tab()
+        log_debug("[LOAD] update 完成")
+        if run_analysis:
+            log_debug("[LOAD] 调用 _run_analysis")
+            self._run_analysis(show_dialog=False)
+
+    def _on_load_error(self, e):
+        self._loaded_path = ""
+        self._sheet_headers = ()
+        self._sheet_rows = []
+        self._result_rows = []
+        self._result_detail_rows = []
+        self._failed_rows = []
+        self._skip_info = {}
+        self._shipped_rows = []
+        self._date_cols = []
+        self._col_map = dict(COL_MAP)
+        self.date_col_cb["values"] = []
+        self.date_col_cb.set("")
+        self._loading = False
+        self.hint_var.set("文件加载失败")
+        self.status_var.set("打开文件失败")
+        self._sync_button_states()
+        msg = str(e)
+        if "locked" in msg.lower() or "permission" in msg.lower():
+            msg = "文件已被其他程序打开，请先关闭后再试"
+        elif "invalid" in msg.lower() or "corrupt" in msg.lower():
+            msg = "文件格式损坏，不是有效的 Excel 文件"
+        elif "not a zip" in msg.lower():
+            msg = "文件不是有效的 Excel 格式（.xlsx/.xlsm），请确认文件完整"
+        self._show_analysis_failure(f"无法打开文件：{msg}")
 
     # -----------------------------------------------------------
     # 内存状态同步
@@ -315,7 +320,7 @@ class FileOpsMixin:
             except Exception: pass
             try: wb_new.close()
             except Exception: pass
-        return new_path, f"(已转为 .xlsx 格式保存)"
+        return new_path, "(已转为 .xlsx 格式保存)"
 
     def _write_to_workbook(self, path, apply_func, success_message, reload_if_current=False):
         """通用写回方法：apply_func(ws) 负责对 worksheet 执行修改。"""
@@ -354,7 +359,6 @@ class FileOpsMixin:
                     self._sync_button_states()
                     self.status_var.set(success_message)
                     if reload_if_current:
-                        # ── 保存 Treeview 选中状态（日期列由 _load_workbook 内部恢复） ──
                         saved_row_nums = set()
                         for iid in self.tv.selection():
                             payload = self._tree_item_map.get(iid)
@@ -497,7 +501,6 @@ class FileOpsMixin:
 
     def _refresh_shipping_tab(self):
         log_debug(f"[SHIP] _refresh_shipping_tab: _sheet_rows={len(self._sheet_rows)}")
-        # 缓存：数据未变更则跳过重建
         cache_key = (id(self._sheet_rows), len(self._sheet_rows))
         if not self._sheet_rows:
             self.shipping_info_var.set("送货记录：暂无数据")
@@ -510,7 +513,6 @@ class FileOpsMixin:
         for item in self.shipping_tv.get_children():
             self.shipping_tv.delete(item)
         self._shipped_rows = []
-        # 使用用户选择的日期列（而非固定第 0 个检测列）
         sel_idx = self.date_col_cb.current()
         date_ci = self._date_cols[sel_idx]["index"] if 0 <= sel_idx < len(self._date_cols) else (
             self._date_cols[0]["index"] if self._date_cols else None)
@@ -538,39 +540,63 @@ class FileOpsMixin:
         self.shipping_info_var.set(f"送货记录：共 {len(self._shipped_rows)} 条已发货")
         self._sync_button_states()
 
-    def _export_shipping(self):
-        if not self._shipped_rows:
-            messagebox.showwarning("提示", "没有送货数据可导出"); return
+    # -----------------------------------------------------------
+    # 导出（通用方法）
+    # -----------------------------------------------------------
+
+    def _do_export(self, name_prefix, columns, row_source, exporting_flag, exporting_btn_texts):
+        """通用导出方法。"""
         desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-        base = f"送货记录_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        base = f"{name_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         fpath = self._unique_path(desktop, base, ".xlsx")
-        rows = list(self._shipped_rows)
+        rows = list(row_source)
+        if not rows:
+            messagebox.showwarning("提示", "没有数据可导出"); return
+        flag_attr = getattr(self, exporting_flag)
+        if flag_attr:
+            messagebox.showinfo("提示", "正在导出，请稍候"); return
+        setattr(self, exporting_flag, True)
+        self._sync_button_states()
+        self.status_var.set("正在导出结果…")
 
         def worker():
             wb = None
             try:
                 wb = openpyxl.Workbook()
-                ws = wb.active; ws.title = "送货记录"
-                ws.append(["送货日期", "客户", "产品", "订单状态", "备注"])
+                ws = wb.active; ws.title = name_prefix
+                ws.append(columns)
                 for r in rows:
                     ws.append(list(r))
                 wb.save(fpath)
-                self.after(0, lambda: (
-                    self.status_var.set(f"✅ 送货记录已导出到桌面：{os.path.basename(fpath)}"),
-                    messagebox.showinfo("导出成功", f"文件已保存到桌面：{os.path.basename(fpath)}")
-                ))
+                fname = os.path.basename(fpath)
+
+                def done():
+                    setattr(self, exporting_flag, False)
+                    self._sync_button_states()
+                    self.status_var.set(f"已保存到桌面：{fname}")
+                    messagebox.showinfo("导出成功", f"文件已保存到桌面：{fname}")
+                self.after(0, done)
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("导出失败", str(e)))
+                def show_error():
+                    setattr(self, exporting_flag, False)
+                    self._sync_button_states()
+                    self.status_var.set("导出失败")
+                    messagebox.showerror("导出失败", str(e))
+                self.after(0, show_error)
             finally:
                 if wb is not None:
                     try: wb.close()
                     except Exception: pass
-
         threading.Thread(target=worker, daemon=True).start()
 
-    # -----------------------------------------------------------
-    # 导出分析结果
-    # -----------------------------------------------------------
+    def _export_shipping(self):
+        self._do_export(
+            "送货记录",
+            ["送货日期", "客户", "产品", "订单状态", "备注"],
+            self._shipped_rows,
+            "_exporting",
+            []
+        )
 
     def _export(self):
         log_debug("[EXPORT] _export 调用")
@@ -585,8 +611,6 @@ class FileOpsMixin:
         self._exporting = True
         self._sync_button_states()
         self.status_var.set("正在导出结果…")
-        self.export_btn.config(text="导出中…")
-        self.bottom_export_btn.config(text="导出中…")
 
         def worker():
             wb = None
@@ -601,17 +625,13 @@ class FileOpsMixin:
 
                 def done():
                     self._exporting = False
-                    self.export_btn.config(text="导出结果")
-                    self.bottom_export_btn.config(text="💾  导出到桌面")
                     self._sync_button_states()
-                    self.status_var.set(f"✅ 已保存到桌面：{fname}")
+                    self.status_var.set(f"已保存到桌面：{fname}")
                     messagebox.showinfo("导出成功", f"文件已保存到桌面：{fname}")
                 self.after(0, done)
             except Exception as e:
                 def show_error():
                     self._exporting = False
-                    self.export_btn.config(text="导出结果")
-                    self.bottom_export_btn.config(text="💾  导出到桌面")
                     self._sync_button_states()
                     self.status_var.set("导出失败")
                     messagebox.showerror("导出失败", str(e))

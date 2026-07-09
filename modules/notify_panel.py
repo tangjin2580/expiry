@@ -3,8 +3,6 @@
 到期提醒工具 — 机器人通知 Mixin（钉钉 / 企业微信 Webhook）
 """
 
-import os
-import json
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -13,38 +11,29 @@ from datetime import datetime
 from modules.config import C, NOTIFY_CONFIG_FILE, FONT_FAMILY
 from modules.utils import log_debug, log_trace
 from modules.widgets import FlatButton
+from modules.webhook_base import (
+    do_webhook_request, build_webhook_payload,
+    check_response_success, load_json_config,
+    save_json_config, parse_mobiles,
+)
+
+_NOTIFY_DEFAULTS = {
+    "dingtalk_url": "",
+    "wechat_url": "",
+    "interval_minutes": 30,
+    "advance_days": 7,
+    "at_mobiles": "",
+    "at_all": False,
+}
 
 
 class NotifyPanelMixin:
     """钉钉 / 企业微信机器人通知面板。"""
 
-    # -----------------------------------------------------------
-    # IO — 通知配置持久化
-    # -----------------------------------------------------------
-
     def _load_notify_config(self):
-        """加载通知配置 JSON。"""
-        default = {
-            "dingtalk_url": "",
-            "wechat_url": "",
-            "interval_minutes": 30,
-            "advance_days": 7,
-            "at_mobiles": "",
-            "at_all": False,
-        }
-        if not os.path.exists(NOTIFY_CONFIG_FILE):
-            return default
-        try:
-            with open(NOTIFY_CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                default.update(data)
-        except Exception:
-            pass
-        return default
+        return load_json_config(NOTIFY_CONFIG_FILE, _NOTIFY_DEFAULTS)
 
     def _save_notify_config(self):
-        """保存通知配置 JSON。"""
         cfg = {
             "dingtalk_url": self._notify_dingtalk_var.get().strip(),
             "wechat_url": self._notify_wechat_var.get().strip(),
@@ -53,34 +42,23 @@ class NotifyPanelMixin:
             "at_mobiles": self._notify_at_mobiles_var.get().strip(),
             "at_all": self._notify_at_all_var.get(),
         }
-        try:
-            with open(NOTIFY_CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
-            log_debug(f"[NOTIFY] 配置已保存: {NOTIFY_CONFIG_FILE}")
-        except Exception as e:
-            log_debug(f"[NOTIFY] 保存配置失败: {e}")
-
-    # -----------------------------------------------------------
-    # UI 构建
-    # -----------------------------------------------------------
+        save_json_config(NOTIFY_CONFIG_FILE, cfg)
+        log_debug(f"[NOTIFY] 配置已保存: {NOTIFY_CONFIG_FILE}")
 
     def _build_notify_tab(self):
         """构建机器人通知标签页。"""
         cfg = self._load_notify_config()
 
-        # ── 顶部标题 ──
         header = tk.Frame(self.notify_tab, bg=C.bg)
         header.pack(fill="x", pady=(0, 10))
         tk.Label(header, text="🤖  机器人通知配置", bg=C.bg, fg=C.text,
                  font=(FONT_FAMILY, 14, "bold")).pack(side="left", padx=16, pady=8)
 
-        # ── 主内容卡片 ──
         card = tk.Frame(self.notify_tab, bg=C.surface, highlightbackground=C.border,
                         highlightthickness=1)
         card.pack(fill="x", padx=12, pady=(0, 10))
         self._treg(card, bg="surface")
 
-        # 钉钉 Webhook
         r1 = tk.Frame(card, bg=C.surface)
         r1.pack(fill="x", padx=16, pady=(14, 6))
         tk.Label(r1, text="📌  钉钉 Webhook", bg=C.surface, fg=C.text,
@@ -93,7 +71,6 @@ class NotifyPanelMixin:
             bg="#0EA5E9", fg="white", height=30, width=86, font=(FONT_FAMILY, 10, "bold"))
         self._notify_dingtalk_test_btn.pack(side="left")
 
-        # 微信 Webhook
         r2 = tk.Frame(card, bg=C.surface)
         r2.pack(fill="x", padx=16, pady=(6, 6))
         tk.Label(r2, text="💬  企业微信 Webhook", bg=C.surface, fg=C.text,
@@ -106,7 +83,6 @@ class NotifyPanelMixin:
             bg="#22C55E", fg="white", height=30, width=86, font=(FONT_FAMILY, 10, "bold"))
         self._notify_wechat_test_btn.pack(side="left")
 
-        # 定时设置行
         r3 = tk.Frame(card, bg=C.surface)
         r3.pack(fill="x", padx=16, pady=(6, 14))
         tk.Label(r3, text="⏱  提醒间隔", bg=C.surface, fg=C.text2,
@@ -125,7 +101,6 @@ class NotifyPanelMixin:
         tk.Label(r3, text="天", bg=C.surface, fg=C.text2,
                  font=(FONT_FAMILY, 10)).pack(side="left", padx=(0, 20))
 
-        # @成员设置行
         r_at = tk.Frame(card, bg=C.surface)
         r_at.pack(fill="x", padx=16, pady=(6, 14))
         tk.Label(r_at, text="📞  @成员手机号", bg=C.surface, fg=C.text2,
@@ -142,7 +117,6 @@ class NotifyPanelMixin:
             bg=C.accent, fg="white", height=32, width=110, font=(FONT_FAMILY, 10, "bold"))
         self._notify_save_btn.pack(side="left", padx=(0, 8))
 
-        # ── 操作按钮行 ──
         bar = tk.Frame(self.notify_tab, bg=C.bg)
         bar.pack(fill="x", padx=12, pady=(0, 10))
 
@@ -160,7 +134,6 @@ class NotifyPanelMixin:
         tk.Label(bar, textvariable=self._notify_status_var, bg=C.bg, fg=C.text2,
                  font=(FONT_FAMILY, 10)).pack(side="left", padx=(8, 0))
 
-        # ── 发送历史 / 日志 ──
         log_card = tk.Frame(self.notify_tab, bg=C.surface, highlightbackground=C.border,
                             highlightthickness=1)
         log_card.pack(fill="both", expand=True, padx=12, pady=(0, 6))
@@ -190,13 +163,8 @@ class NotifyPanelMixin:
         self._notify_log_vsb.pack(side="right", fill="y", pady=(0, 12))
         self._notify_log_tv.configure(yscrollcommand=self._notify_log_vsb.set)
 
-        # 定时调度状态
         self._notify_schedule_id = None
         self._notify_schedule_running = False
-
-    # -----------------------------------------------------------
-    # Webhook 发送
-    # -----------------------------------------------------------
 
     def _build_notify_message(self):
         """根据分析结果构建通知文本，越临近越靠前。"""
@@ -204,7 +172,6 @@ class NotifyPanelMixin:
         if not rows:
             return None
         days_limit = self._notify_days_var.get()
-        # 筛选：在提醒天数范围内的
         filtered = [r for r in rows if r["diff"] <= days_limit]
         if not filtered:
             return None
@@ -212,9 +179,7 @@ class NotifyPanelMixin:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
         lines = [f"📦 发货提醒 ({now_str})", f"共 {len(filtered)} 条待处理：", ""]
 
-        # 按紧急程度排序（已包含在 detail_rows 的排序中）
         for i, r in enumerate(filtered, 1):
-            urgency = ""
             if r["diff"] < 0:
                 urgency = "🔴 已过期"
             elif r["diff"] == 0:
@@ -230,89 +195,28 @@ class NotifyPanelMixin:
 
         return "\n".join(lines)
 
-    def _do_webhook_request(self, url, payload):
-        """发送 HTTP POST 请求（在工作线程中执行）。"""
-        import urllib.request
-        import urllib.error
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=data,
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            method="POST"
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-                return resp.status == 200, body
-        except urllib.error.HTTPError as e:
-            return False, f"HTTP {e.code}: {e.reason}"
-        except Exception as e:
-            return False, str(e)
-
-    def _parse_at_mobiles(self):
-        """解析手机号字符串为列表（逗号/空格分隔）。"""
-        raw = self._notify_at_mobiles_var.get().strip()
-        if not raw:
-            return []
-        return [p.strip() for p in raw.replace("，", ",").split(",") if p.strip()]
-
     def _send_to_platform(self, platform, message, is_test=False):
         """发送到指定平台（在工作线程中）。"""
-        at_mobiles = self._parse_at_mobiles()
+        at_mobiles = parse_mobiles(self._notify_at_mobiles_var.get().strip())
         at_all = self._notify_at_all_var.get()
 
         if platform == "dingtalk":
             url = self._notify_dingtalk_var.get().strip()
-            if not url:
-                self.after(0, lambda: self._log_notify_result(platform, False, "未配置 Webhook 地址"))
-                return
-            payload = {
-                "msgtype": "text",
-                "text": {"content": message},
-            }
-            # 钉钉 @成员：atMobiles + isAtAll
-            if at_all:
-                payload["at"] = {"atMobiles": at_mobiles, "isAtAll": True}
-            elif at_mobiles:
-                payload["at"] = {"atMobiles": at_mobiles, "isAtAll": False}
         elif platform == "wechat":
             url = self._notify_wechat_var.get().strip()
-            if not url:
-                self.after(0, lambda: self._log_notify_result(platform, False, "未配置 Webhook 地址"))
-                return
-            payload = {
-                "msgtype": "text",
-                "text": {"content": message},
-            }
-            # 企业微信 @成员：mentioned_mobile_list + mentioned_list
-            if at_all:
-                payload["text"]["mentioned_list"] = ["all"]
-                if at_mobiles:
-                    payload["text"]["mentioned_mobile_list"] = at_mobiles
-            elif at_mobiles:
-                payload["text"]["mentioned_mobile_list"] = at_mobiles
         else:
             return
 
-        ok, resp_body = self._do_webhook_request(url, payload)
+        if not url:
+            self.after(0, lambda: self._log_notify_result(platform, False, "未配置 Webhook 地址"))
+            return
 
-        # 解析响应判断是否成功
-        success = ok
-        try:
-            resp_json = json.loads(resp_body)
-            if platform == "dingtalk":
-                success = ok and resp_json.get("errcode", -1) == 0
-            elif platform == "wechat":
-                success = ok and resp_json.get("errcode", -1) == 0
-        except Exception:
-            pass
+        payload = build_webhook_payload(platform, message, at_mobiles, at_all)
+        ok, resp_body = do_webhook_request(url, payload)
+        success = check_response_success(platform, ok, resp_body)
 
         label = "测试" if is_test else "通知"
-        if success:
-            summary = f"[{label}] 发送成功"
-        else:
-            summary = f"[{label}] 失败: {resp_body[:100]}"
-
+        summary = f"[{label}] 发送成功" if success else f"[{label}] 失败: {resp_body[:100]}"
         self.after(0, lambda: self._log_notify_result(platform, success, summary))
         log_debug(f"[NOTIFY] {platform} {label}: ok={success}, resp={resp_body[:200]}")
 
@@ -323,7 +227,6 @@ class NotifyPanelMixin:
         tag = "ok" if success else "fail"
         status = "✅" if success else "❌"
         self._notify_log_tv.insert("", "end", values=(now_str, plat_name, status, summary), tags=(tag,))
-        # 保持最新条目在顶部可见
         children = self._notify_log_tv.get_children()
         if children:
             self._notify_log_tv.see(children[-1])
@@ -332,10 +235,6 @@ class NotifyPanelMixin:
     def _clear_notify_log(self):
         for item in self._notify_log_tv.get_children():
             self._notify_log_tv.delete(item)
-
-    # -----------------------------------------------------------
-    # 用户操作
-    # -----------------------------------------------------------
 
     def _test_send(self, platform):
         """测试发送。"""
@@ -352,7 +251,6 @@ class NotifyPanelMixin:
             messagebox.showinfo("通知", "没有需要提醒的待发货订单", parent=self)
             return
         log_debug(f"[NOTIFY] 立即发送, 内容长度={len(msg)}")
-        # 发送到所有已配置的平台
         dingtalk_url = self._notify_dingtalk_var.get().strip()
         wechat_url = self._notify_wechat_var.get().strip()
         if dingtalk_url:
@@ -379,7 +277,6 @@ class NotifyPanelMixin:
         if not dingtalk_url and not wechat_url:
             messagebox.showwarning("提示", "请先配置至少一个 Webhook 地址", parent=self)
             return
-        # 先保存配置
         self._save_notify_config()
         self._notify_schedule_running = True
         self._notify_toggle_btn.config(text="⏹  停止定时提醒", bg="#DC2626")
@@ -402,10 +299,9 @@ class NotifyPanelMixin:
         """定时回调：发送通知 → 调度下一次。"""
         if not self._notify_schedule_running:
             return
-        # 自动重新分析（确保推送数据不是过期的）
+        # 自动重新分析（后台模式不弹窗）
         if getattr(self, "_loaded_path", "") and not getattr(self, "_checking", False):
-            self._do_check()
-        # 发送
+            self._run_analysis(show_dialog=False)
         msg = self._build_notify_message()
         if msg is not None:
             dingtalk_url = self._notify_dingtalk_var.get().strip()
@@ -418,7 +314,6 @@ class NotifyPanelMixin:
                                  daemon=True).start()
         else:
             log_debug("[NOTIFY] 定时：无待提醒订单，跳过")
-        # 调度下一次（最小间隔 1 分钟）
         interval_min = max(1, self._notify_interval_var.get())
         interval_ms = interval_min * 60 * 1000
         self._notify_schedule_id = self.after(interval_ms, self._schedule_tick)

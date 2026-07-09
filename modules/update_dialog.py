@@ -12,15 +12,15 @@ import tkinter as tk
 from tkinter import ttk
 
 from modules.config import C, FONT_FAMILY, APP_VERSION, GITHUB_REPO, check_for_updates
+from modules.markdown_renderer import render_markdown
 
 
 class UpdateDialog(tk.Toplevel):
     """检查更新 + 关于页面。"""
 
-    _instance = None  # 单例：避免重复打开
+    _instance = None
 
     def __init__(self, parent):
-        # 单例检查
         if UpdateDialog._instance is not None:
             try:
                 UpdateDialog._instance.lift()
@@ -38,7 +38,6 @@ class UpdateDialog(tk.Toplevel):
         self.minsize(560, 480)
         self.configure(bg=C.bg)
 
-        # 如果有 parent 窗口则设为 transient
         if parent and parent.winfo_viewable():
             self.transient(parent)
 
@@ -52,23 +51,17 @@ class UpdateDialog(tk.Toplevel):
         UpdateDialog._instance = None
         self.destroy()
 
-    # ==================================================================
-    #  UI
-    # ==================================================================
-
     def _build_ui(self):
         self._build_header()
         self._build_update_card()
         self._build_readme()
         self._build_footer()
 
-    # ── 顶部标题栏 ──
     def _build_header(self):
         h = tk.Frame(self, bg=C.surface, height=80)
         h.pack(fill="x", side="top")
         h.pack_propagate(False)
 
-        # 顶部装饰条
         accent = tk.Frame(h, bg=C.accent, height=3)
         accent.place(x=0, y=0, relwidth=1)
 
@@ -92,7 +85,6 @@ class UpdateDialog(tk.Toplevel):
             font=(FONT_FAMILY, 10, "bold"), cursor="hand2")
         self._github_btn.pack()
 
-    # ── 更新检查卡片 ──
     def _build_update_card(self):
         card = tk.Frame(self, bg=C.surface, highlightbackground=C.border,
                         highlightthickness=1)
@@ -130,7 +122,6 @@ class UpdateDialog(tk.Toplevel):
             font=(FONT_FAMILY, 10, "bold"), cursor="hand2", state="disabled")
         self._download_btn.pack(side="left", padx=(12, 0))
 
-        # 更新详情区（初始隐藏）
         self._detail_frame = tk.Frame(card, bg=C.surface2)
         self._detail_text = tk.Text(
             self._detail_frame, wrap="word", height=6, relief="flat",
@@ -138,7 +129,6 @@ class UpdateDialog(tk.Toplevel):
             padx=10, pady=6, state="disabled", bd=0)
         self._detail_text.pack(fill="both", expand=True)
 
-    # ── README 内容 ──
     def _build_readme(self):
         readme_frame = tk.Frame(self, bg=C.bg)
         readme_frame.pack(fill="both", expand=True, padx=16, pady=(6, 6))
@@ -161,7 +151,6 @@ class UpdateDialog(tk.Toplevel):
         vsb.pack(side="right", fill="y")
         self._readme_text.configure(yscrollcommand=vsb.set)
 
-        # 配置文本标签
         self._readme_text.tag_configure("h1", font=(FONT_FAMILY, 15, "bold"),
                                         foreground=C.accent, spacing1=8, spacing3=4)
         self._readme_text.tag_configure("h2", font=(FONT_FAMILY, 12, "bold"),
@@ -188,19 +177,14 @@ class UpdateDialog(tk.Toplevel):
 
         self._load_readme()
 
-    # ── 底部 ──
     def _build_footer(self):
         bot = tk.Frame(self, bg=C.surface2, height=36)
         bot.pack(fill="x", side="bottom")
         bot.pack_propagate(False)
         tk.Frame(bot, bg=C.border, height=1).pack(fill="x")
-        tk.Label(bot, text=f"© {GITHUB_REPO}  ·  MIT License",
+        tk.Label(bot, text=f"\u00a9 {GITHUB_REPO}  ·  MIT License",
                  bg=C.surface2, fg=C.text3,
                  font=(FONT_FAMILY, 9)).pack(pady=8)
-
-    # ==================================================================
-    #  README 渲染
-    # ==================================================================
 
     def _load_readme(self):
         """读取并渲染 README.md 到文本控件。"""
@@ -218,126 +202,9 @@ class UpdateDialog(tk.Toplevel):
 
         self._readme_text.config(state="normal")
         self._readme_text.delete("1.0", "end")
-        self._render_markdown(content)
+        render_markdown(self._readme_text, content, FONT_FAMILY, C.accent, C.text, C.text2)
         self._readme_text.config(state="disabled")
-        # 滚回顶部
         self._readme_text.yview_moveto(0)
-
-    def _render_markdown(self, text):
-        """简易 Markdown → Tkinter Text 渲染。"""
-        lines = text.split("\n")
-        in_code_block = False
-
-        for line in lines:
-            # 代码块
-            if line.strip().startswith("```"):
-                in_code_block = not in_code_block
-                if in_code_block:
-                    self._readme_text.insert("end", "\n")
-                else:
-                    self._readme_text.insert("end", "\n")
-                continue
-
-            if in_code_block:
-                self._readme_text.insert("end", line + "\n", "code_block")
-                continue
-
-            stripped = line.strip()
-
-            # 空行
-            if not stripped:
-                self._readme_text.insert("end", "\n")
-                continue
-
-            # 分隔线
-            if stripped in ("---", "***", "___"):
-                self._readme_text.insert("end", "─" * 60 + "\n", "separator")
-                continue
-
-            # 标题
-            if stripped.startswith("# "):
-                self._readme_text.insert("end", stripped[2:] + "\n", "h1")
-                continue
-            if stripped.startswith("## "):
-                self._readme_text.insert("end", stripped[3:] + "\n", "h2")
-                continue
-            if stripped.startswith("### "):
-                self._readme_text.insert("end", stripped[4:] + "\n", "h3")
-                continue
-
-            # 引用
-            if stripped.startswith("> "):
-                self._readme_text.insert("end", stripped[2:] + "\n", "quote")
-                continue
-
-            # 列表项
-            if stripped.startswith("- ") or stripped.startswith("* "):
-                bullet_text = stripped[2:]
-                self._readme_text.insert("end", "•  ", "bullet")
-                self._insert_inline(bullet_text, "bullet")
-                self._readme_text.insert("end", "\n")
-                continue
-
-            # 有序列表
-            if len(stripped) > 2 and stripped[0].isdigit() and ". " in stripped[:5]:
-                idx = stripped.index(". ")
-                num = stripped[:idx + 2]
-                rest = stripped[idx + 2:]
-                self._readme_text.insert("end", f"  {num}  ", "body")
-                self._insert_inline(rest, "body")
-                self._readme_text.insert("end", "\n")
-                continue
-
-            # 普通文本
-            self._insert_inline(stripped, "body")
-            self._readme_text.insert("end", "\n")
-
-    def _insert_inline(self, text, base_tag):
-        """处理行内格式：**bold**、`code`、[text](url)。"""
-        import re
-        # 模式：**bold** | `code` | [text](url)
-        pattern = re.compile(
-            r'\*\*(.+?)\*\*'     # bold
-            r'|`(.+?)`'          # code
-            r'|\[(.+?)\]\((.+?)\)'  # link
-        )
-        pos = 0
-        for m in pattern.finditer(text):
-            # 插入匹配前的普通文本
-            if m.start() > pos:
-                self._readme_text.insert("end", text[pos:m.start()], base_tag)
-
-            if m.group(1):  # bold
-                self._readme_text.insert("end", m.group(1), "bold")
-            elif m.group(2):  # code
-                self._readme_text.insert("end", m.group(2), "code")
-            elif m.group(3) and m.group(4):  # link
-                link_text = m.group(3)
-                link_url = m.group(4)
-                tag_name = f"link_{id(m)}"
-                self._readme_text.tag_configure(
-                    tag_name, foreground=C.accent, underline=True,
-                    font=(FONT_FAMILY, 10))
-                self._readme_text.tag_bind(
-                    tag_name, "<Button-1>",
-                    lambda e, u=link_url: webbrowser.open(u))
-                self._readme_text.tag_bind(
-                    tag_name, "<Enter>",
-                    lambda e: self._readme_text.config(cursor="hand2"))
-                self._readme_text.tag_bind(
-                    tag_name, "<Leave>",
-                    lambda e: self._readme_text.config(cursor=""))
-                self._readme_text.insert("end", link_text, tag_name)
-
-            pos = m.end()
-
-        # 剩余文本
-        if pos < len(text):
-            self._readme_text.insert("end", text[pos:], base_tag)
-
-    # ==================================================================
-    #  更新检查
-    # ==================================================================
 
     def _do_check(self):
         """点击检查更新按钮。"""
@@ -370,7 +237,6 @@ class UpdateDialog(tk.Toplevel):
                 f"发现新版本：{result['latest']}")
             self._update_status_lbl.config(fg="#16A34A")
             self._download_btn.config(state="normal")
-            # 显示更新详情
             self._detail_frame.pack(fill="x", padx=16, pady=(0, 8))
             self._detail_text.config(state="normal")
             self._detail_text.delete("1.0", "end")

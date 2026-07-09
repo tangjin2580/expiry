@@ -6,13 +6,13 @@
 
 import os
 import sys
-import re
 import threading
 import webbrowser
 import tkinter as tk
 from tkinter import ttk
 
 from modules.config import C, FONT_FAMILY, APP_VERSION, GITHUB_REPO, check_for_updates
+from modules.markdown_renderer import render_markdown
 
 
 class UpdatePanelMixin:
@@ -24,7 +24,6 @@ class UpdatePanelMixin:
         self._up_update_result = None
         self._up_checking = False
 
-        # ── 顶部信息栏 ──
         header = tk.Frame(tab, bg=C.surface, height=70)
         header.pack(fill="x", pady=(0, 8))
         header.pack_propagate(False)
@@ -53,7 +52,6 @@ class UpdatePanelMixin:
             font=(FONT_FAMILY, 10, "bold"))
         self._up_github_btn.pack()
 
-        # ── 更新检查卡片 ──
         card = tk.Frame(tab, bg=C.surface, highlightbackground=C.border,
                         highlightthickness=1)
         card.pack(fill="x", padx=12, pady=(0, 8))
@@ -95,7 +93,6 @@ class UpdatePanelMixin:
         self._up_download_btn.pack(side="left", padx=(12, 0))
         self._up_download_btn.config(state="disabled")
 
-        # 更新详情区（初始隐藏）
         self._up_detail_frame = tk.Frame(card, bg=C.surface2)
         self._up_detail_text = tk.Text(
             self._up_detail_frame, wrap="word", height=6, relief="flat",
@@ -103,7 +100,6 @@ class UpdatePanelMixin:
             padx=10, pady=6, state="disabled", bd=0)
         self._up_detail_text.pack(fill="both", expand=True)
 
-        # ── README 区域 ──
         readme_frame = tk.Frame(tab, bg=C.bg)
         readme_frame.pack(fill="both", expand=True, padx=12, pady=(0, 8))
 
@@ -126,8 +122,11 @@ class UpdatePanelMixin:
         vsb.pack(side="right", fill="y")
         self._up_readme_text.configure(yscrollcommand=vsb.set)
 
-        # 文本标签样式
-        txt = self._up_readme_text
+        self._configure_markdown_tags(self._up_readme_text)
+        self._up_load_readme()
+
+    def _configure_markdown_tags(self, txt):
+        """为 Text 控件配置 Markdown 渲染标签。"""
         txt.tag_configure("h1", font=(FONT_FAMILY, 15, "bold"),
                           foreground=C.accent, spacing1=8, spacing3=4)
         txt.tag_configure("h2", font=(FONT_FAMILY, 12, "bold"),
@@ -152,12 +151,6 @@ class UpdatePanelMixin:
         txt.tag_configure("separator", foreground=C.border,
                           spacing1=8, spacing3=8)
 
-        self._up_load_readme()
-
-    # ==================================================================
-    #  README 渲染
-    # ==================================================================
-
     def _up_load_readme(self):
         """读取并渲染 README.md。"""
         if getattr(sys, "frozen", False):
@@ -175,107 +168,9 @@ class UpdatePanelMixin:
         txt = self._up_readme_text
         txt.config(state="normal")
         txt.delete("1.0", "end")
-        self._up_render_markdown(content)
+        render_markdown(txt, content, FONT_FAMILY, C.accent, C.text, C.text2)
         txt.config(state="disabled")
         txt.yview_moveto(0)
-
-    def _up_render_markdown(self, text):
-        """简易 Markdown → Tkinter Text 渲染。"""
-        txt = self._up_readme_text
-        lines = text.split("\n")
-        in_code_block = False
-
-        for line in lines:
-            if line.strip().startswith("```"):
-                in_code_block = not in_code_block
-                txt.insert("end", "\n")
-                continue
-
-            if in_code_block:
-                txt.insert("end", line + "\n", "code_block")
-                continue
-
-            stripped = line.strip()
-
-            if not stripped:
-                txt.insert("end", "\n")
-                continue
-
-            if stripped in ("---", "***", "___"):
-                txt.insert("end", "─" * 60 + "\n", "separator")
-                continue
-
-            if stripped.startswith("# "):
-                txt.insert("end", stripped[2:] + "\n", "h1")
-                continue
-            if stripped.startswith("## "):
-                txt.insert("end", stripped[3:] + "\n", "h2")
-                continue
-            if stripped.startswith("### "):
-                txt.insert("end", stripped[4:] + "\n", "h3")
-                continue
-
-            if stripped.startswith("> "):
-                txt.insert("end", stripped[2:] + "\n", "quote")
-                continue
-
-            if stripped.startswith("- ") or stripped.startswith("* "):
-                txt.insert("end", "•  ", "bullet")
-                self._up_insert_inline(stripped[2:], "bullet")
-                txt.insert("end", "\n")
-                continue
-
-            if len(stripped) > 2 and stripped[0].isdigit() and ". " in stripped[:5]:
-                idx = stripped.index(". ")
-                num = stripped[:idx + 2]
-                rest = stripped[idx + 2:]
-                txt.insert("end", f"  {num}  ", "body")
-                self._up_insert_inline(rest, "body")
-                txt.insert("end", "\n")
-                continue
-
-            self._up_insert_inline(stripped, "body")
-            txt.insert("end", "\n")
-
-    def _up_insert_inline(self, text, base_tag):
-        """处理行内格式：**bold**、`code`、[text](url)。"""
-        txt = self._up_readme_text
-        pattern = re.compile(
-            r'\*\*(.+?)\*\*'
-            r'|`(.+?)`'
-            r'|\[(.+?)\]\((.+?)\)'
-        )
-        pos = 0
-        for m in pattern.finditer(text):
-            if m.start() > pos:
-                txt.insert("end", text[pos:m.start()], base_tag)
-
-            if m.group(1):
-                txt.insert("end", m.group(1), "bold")
-            elif m.group(2):
-                txt.insert("end", m.group(2), "code")
-            elif m.group(3) and m.group(4):
-                link_text = m.group(3)
-                link_url = m.group(4)
-                tag_name = f"up_link_{id(m)}"
-                txt.tag_configure(tag_name, foreground=C.accent, underline=True,
-                                  font=(FONT_FAMILY, 10))
-                txt.tag_bind(tag_name, "<Button-1>",
-                             lambda e, u=link_url: webbrowser.open(u))
-                txt.tag_bind(tag_name, "<Enter>",
-                             lambda e: txt.config(cursor="hand2"))
-                txt.tag_bind(tag_name, "<Leave>",
-                             lambda e: txt.config(cursor=""))
-                txt.insert("end", link_text, tag_name)
-
-            pos = m.end()
-
-        if pos < len(text):
-            txt.insert("end", text[pos:], base_tag)
-
-    # ==================================================================
-    #  更新检查
-    # ==================================================================
 
     def _up_do_check(self):
         """点击检查更新按钮。"""

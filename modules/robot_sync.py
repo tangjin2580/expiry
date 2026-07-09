@@ -3,8 +3,6 @@
 到期提醒工具 — 机器人同步面板 Mixin（钉钉 / 企业微信 Webhook 定时推送）
 """
 
-import os
-import json
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -13,39 +11,30 @@ from datetime import datetime
 from modules.config import C, ROBOT_SYNC_CONFIG_FILE, FONT_FAMILY
 from modules.utils import log_debug, log_trace
 from modules.widgets import FlatButton
+from modules.webhook_base import (
+    do_webhook_request, build_webhook_payload,
+    check_response_success, load_json_config,
+    save_json_config, parse_mobiles,
+)
+
+_RS_DEFAULTS = {
+    "dingtalk_url": "",
+    "wechat_url": "",
+    "interval_minutes": 30,
+    "advance_days": 7,
+    "auto_start": False,
+    "at_mobiles": "",
+    "at_all": False,
+}
 
 
 class RobotSyncMixin:
     """机器人同步面板：Webhook 配置 + 定时推送 + 消息预览。"""
 
-    # -----------------------------------------------------------
-    # IO — 配置持久化
-    # -----------------------------------------------------------
-
     def _load_robot_sync_config(self):
-        """加载同步配置 JSON。"""
-        default = {
-            "dingtalk_url": "",
-            "wechat_url": "",
-            "interval_minutes": 30,
-            "advance_days": 7,
-            "auto_start": False,
-            "at_mobiles": "",
-            "at_all": False,
-        }
-        if not os.path.exists(ROBOT_SYNC_CONFIG_FILE):
-            return default
-        try:
-            with open(ROBOT_SYNC_CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                default.update(data)
-        except Exception:
-            pass
-        return default
+        return load_json_config(ROBOT_SYNC_CONFIG_FILE, _RS_DEFAULTS)
 
     def _save_robot_sync_config(self):
-        """保存同步配置 JSON。"""
         cfg = {
             "dingtalk_url": self._rs_dingtalk_var.get().strip(),
             "wechat_url": self._rs_wechat_var.get().strip(),
@@ -55,22 +44,13 @@ class RobotSyncMixin:
             "at_mobiles": self._rs_at_mobiles_var.get().strip(),
             "at_all": self._rs_at_all_var.get(),
         }
-        try:
-            with open(ROBOT_SYNC_CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
-            log_debug(f"[SYNC] 配置已保存: {ROBOT_SYNC_CONFIG_FILE}")
-        except Exception as e:
-            log_debug(f"[SYNC] 保存配置失败: {e}")
-
-    # -----------------------------------------------------------
-    # UI 构建
-    # -----------------------------------------------------------
+        save_json_config(ROBOT_SYNC_CONFIG_FILE, cfg)
+        log_debug(f"[SYNC] 配置已保存: {ROBOT_SYNC_CONFIG_FILE}")
 
     def _build_robot_sync_tab(self):
         """构建机器人同步标签页。"""
         cfg = self._load_robot_sync_config()
 
-        # ── 顶部标题 ──
         header = tk.Frame(self.robot_sync_tab, bg=C.bg)
         header.pack(fill="x", pady=(0, 10))
         tk.Label(header, text="🔗  机器人同步", bg=C.bg, fg=C.text,
@@ -78,7 +58,6 @@ class RobotSyncMixin:
         tk.Label(header, text="配置 Webhook 地址，定时推送发货提醒", bg=C.bg, fg=C.text3,
                  font=(FONT_FAMILY, 10)).pack(side="left", padx=(0, 16))
 
-        # ── Webhook 配置卡片 ──
         webhook_card = tk.Frame(self.robot_sync_tab, bg=C.surface,
                                 highlightbackground=C.border, highlightthickness=1)
         webhook_card.pack(fill="x", padx=12, pady=(0, 10))
@@ -89,7 +68,6 @@ class RobotSyncMixin:
         tk.Label(card_title, text="📡  Webhook 地址配置", bg=C.surface, fg=C.text,
                  font=(FONT_FAMILY, 11, "bold")).pack(side="left")
 
-        # 钉钉
         r1 = tk.Frame(webhook_card, bg=C.surface)
         r1.pack(fill="x", padx=16, pady=(4, 4))
         tk.Label(r1, text="📌  钉钉机器人", bg=C.surface, fg=C.text,
@@ -102,7 +80,6 @@ class RobotSyncMixin:
             bg="#0EA5E9", fg="white", height=30, width=80, font=(FONT_FAMILY, 10, "bold"))
         self._rs_dingtalk_test_btn.pack(side="left")
 
-        # 企业微信
         r2 = tk.Frame(webhook_card, bg=C.surface)
         r2.pack(fill="x", padx=16, pady=(4, 4))
         tk.Label(r2, text="💬  企业微信机器人", bg=C.surface, fg=C.text,
@@ -115,7 +92,6 @@ class RobotSyncMixin:
             bg="#22C55E", fg="white", height=30, width=80, font=(FONT_FAMILY, 10, "bold"))
         self._rs_wechat_test_btn.pack(side="left")
 
-        # ── 提醒策略卡片 ──
         strategy_card = tk.Frame(self.robot_sync_tab, bg=C.surface,
                                  highlightbackground=C.border, highlightthickness=1)
         strategy_card.pack(fill="x", padx=12, pady=(0, 10))
@@ -149,7 +125,6 @@ class RobotSyncMixin:
         ttk.Checkbutton(sr1, text="启动时自动开启", variable=self._rs_auto_start_var,
                         style="Flat.TCheckbutton").pack(side="left")
 
-        # @成员设置行
         sr_at = tk.Frame(strategy_card, bg=C.surface)
         sr_at.pack(fill="x", padx=16, pady=(0, 4))
         tk.Label(sr_at, text="📞  @成员手机号", bg=C.surface, fg=C.text2,
@@ -161,7 +136,6 @@ class RobotSyncMixin:
         ttk.Checkbutton(sr_at, text="@所有人", variable=self._rs_at_all_var,
                         style="Flat.TCheckbutton").pack(side="left")
 
-        # 按钮行
         sr2 = tk.Frame(strategy_card, bg=C.surface)
         sr2.pack(fill="x", padx=16, pady=(4, 12))
 
@@ -189,7 +163,6 @@ class RobotSyncMixin:
         tk.Label(sr2, textvariable=self._rs_status_var, bg=C.surface, fg=C.text2,
                  font=(FONT_FAMILY, 10)).pack(side="left", padx=(8, 0))
 
-        # ── 消息预览区 ──
         preview_card = tk.Frame(self.robot_sync_tab, bg=C.surface,
                                 highlightbackground=C.border, highlightthickness=1)
         preview_card.pack(fill="both", expand=True, padx=12, pady=(0, 6))
@@ -220,20 +193,14 @@ class RobotSyncMixin:
         self._rs_log_vsb.pack(side="right", fill="y", pady=(0, 12))
         self._rs_log_tv.configure(yscrollcommand=self._rs_log_vsb.set)
 
-        # 定时调度状态
         self._rs_schedule_id = None
         self._rs_schedule_running = False
 
-        # 自动启动
         if cfg.get("auto_start", False):
             dingtalk_url = cfg.get("dingtalk_url", "").strip()
             wechat_url = cfg.get("wechat_url", "").strip()
             if dingtalk_url or wechat_url:
                 self.after(2000, self._rs_auto_start)
-
-    # -----------------------------------------------------------
-    # 消息构建 — 格式：客户 + 送货时间 + 货品 + 数量
-    # -----------------------------------------------------------
 
     def _rs_build_message(self):
         """根据分析结果构建推送文本，越临近越靠前。"""
@@ -248,7 +215,6 @@ class RobotSyncMixin:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
         lines = [f"📦 发货提醒 ({now_str})", f"共 {len(filtered)} 条待处理：", ""]
 
-        # 已按紧急程度排序
         for i, r in enumerate(filtered, 1):
             if r["diff"] < 0:
                 urgency = "🔴已过期"
@@ -257,9 +223,9 @@ class RobotSyncMixin:
             elif r["diff"] <= 1:
                 urgency = "🟡明天"
             elif r["diff"] <= 3:
-                urgency = "🟡{0}天内".format(r["diff"])
+                urgency = f"🟡{r['diff']}天内"
             else:
-                urgency = "🔵{0}天内".format(r["diff"])
+                urgency = f"🔵{r['diff']}天内"
 
             customer = r.get("customer") or "未知客户"
             date_str = r.get("date") or "未知日期"
@@ -272,79 +238,25 @@ class RobotSyncMixin:
 
         return "\n".join(lines)
 
-    # -----------------------------------------------------------
-    # Webhook 发送
-    # -----------------------------------------------------------
-
-    def _rs_do_webhook(self, url, payload):
-        """发送 HTTP POST 请求。"""
-        import urllib.request
-        import urllib.error
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=data,
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            method="POST"
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-                return resp.status == 200, body
-        except urllib.error.HTTPError as e:
-            return False, f"HTTP {e.code}: {e.reason}"
-        except Exception as e:
-            return False, str(e)
-
-    def _rs_parse_at_mobiles(self):
-        """解析手机号字符串为列表（逗号/空格分隔）。"""
-        raw = self._rs_at_mobiles_var.get().strip()
-        if not raw:
-            return []
-        return [p.strip() for p in raw.replace("，", ",").split(",") if p.strip()]
-
     def _rs_send_to_platform(self, platform, message, is_test=False):
         """发送到指定平台（在工作线程中）。"""
-        at_mobiles = self._rs_parse_at_mobiles()
+        at_mobiles = parse_mobiles(self._rs_at_mobiles_var.get().strip())
         at_all = self._rs_at_all_var.get()
 
         if platform == "dingtalk":
             url = self._rs_dingtalk_var.get().strip()
-            if not url:
-                self.after(0, lambda: self._rs_log_result(platform, False, "未配置 Webhook 地址"))
-                return
-            payload = {"msgtype": "text", "text": {"content": message}}
-            # 钉钉 @成员：atMobiles + isAtAll
-            if at_all:
-                payload["at"] = {"atMobiles": at_mobiles, "isAtAll": True}
-            elif at_mobiles:
-                payload["at"] = {"atMobiles": at_mobiles, "isAtAll": False}
         elif platform == "wechat":
             url = self._rs_wechat_var.get().strip()
-            if not url:
-                self.after(0, lambda: self._rs_log_result(platform, False, "未配置 Webhook 地址"))
-                return
-            payload = {"msgtype": "text", "text": {"content": message}}
-            # 企业微信 @成员：mentioned_mobile_list + mentioned_list
-            if at_all:
-                payload["text"]["mentioned_list"] = ["all"]
-                if at_mobiles:
-                    payload["text"]["mentioned_mobile_list"] = at_mobiles
-            elif at_mobiles:
-                payload["text"]["mentioned_mobile_list"] = at_mobiles
         else:
             return
 
-        ok, resp_body = self._rs_do_webhook(url, payload)
+        if not url:
+            self.after(0, lambda: self._rs_log_result(platform, False, "未配置 Webhook 地址"))
+            return
 
-        success = ok
-        try:
-            resp_json = json.loads(resp_body)
-            if platform == "dingtalk":
-                success = ok and resp_json.get("errcode", -1) == 0
-            elif platform == "wechat":
-                success = ok and resp_json.get("errcode", -1) == 0
-        except Exception:
-            pass
+        payload = build_webhook_payload(platform, message, at_mobiles, at_all)
+        ok, resp_body = do_webhook_request(url, payload)
+        success = check_response_success(platform, ok, resp_body)
 
         label = "测试" if is_test else "推送"
         summary = f"[{label}] 发送成功" if success else f"[{label}] 失败: {resp_body[:100]}"
@@ -367,14 +279,10 @@ class RobotSyncMixin:
         for item in self._rs_log_tv.get_children():
             self._rs_log_tv.delete(item)
 
-    # -----------------------------------------------------------
-    # 用户操作
-    # -----------------------------------------------------------
-
     def _rs_save_config(self):
         """保存配置并提示。"""
         self._save_robot_sync_config()
-        self.status_var.set("✅ 同步配置已保存")
+        self.status_var.set("已保存")
         messagebox.showinfo("保存成功", "机器人同步配置已保存", parent=self)
 
     def _rs_test_send(self, platform):
@@ -391,19 +299,17 @@ class RobotSyncMixin:
         msg = self._rs_build_message()
         if msg is None:
             self._rs_log_tv.insert("", "end",
-                values=(datetime.now().strftime("%H:%M:%S"), "预览", "⚠️",
+                values=(datetime.now().strftime("%H:%M:%S"), "预览", "\u26a0\ufe0f",
                         "没有需要提醒的待发货订单（请先加载 Excel 并执行分析）"),
                 tags=("preview",))
             self.status_var.set("预览：无待提醒订单")
             return
-        # 截断到 500 字符用于预览
         preview = msg[:500] + ("..." if len(msg) > 500 else "")
         line_count = msg.count("\n") + 1
         self._rs_log_tv.insert("", "end",
-            values=(datetime.now().strftime("%H:%M:%S"), "预览", "👁",
+            values=(datetime.now().strftime("%H:%M:%S"), "预览", "\U0001f441",
                     f"共{line_count}行 | {preview}"),
             tags=("preview",))
-        # 同时弹窗展示完整内容
         self._rs_show_preview_dialog(msg)
 
     def _rs_show_preview_dialog(self, msg):
@@ -453,10 +359,6 @@ class RobotSyncMixin:
             self.status_var.set("请先配置 Webhook 地址")
             messagebox.showwarning("提示", "请先配置钉钉或企业微信的 Webhook 地址", parent=self)
 
-    # -----------------------------------------------------------
-    # 定时调度
-    # -----------------------------------------------------------
-
     def _rs_toggle_schedule(self):
         if self._rs_schedule_running:
             self._rs_stop_schedule()
@@ -490,9 +392,9 @@ class RobotSyncMixin:
         """定时回调：发送通知 → 调度下一次。"""
         if not self._rs_schedule_running:
             return
-        # 自动重新分析（确保推送数据不是过期的）
+        # 自动重新分析（后台模式不弹窗）
         if getattr(self, "_loaded_path", "") and not getattr(self, "_checking", False):
-            self._do_check()
+            self._run_analysis(show_dialog=False)
         msg = self._rs_build_message()
         if msg is not None:
             dingtalk_url = self._rs_dingtalk_var.get().strip()
@@ -505,7 +407,6 @@ class RobotSyncMixin:
                                  daemon=True).start()
         else:
             log_debug("[SYNC] 定时：无待提醒订单，跳过")
-        # 调度下一次（最小间隔 1 分钟）
         interval_min = max(1, self._rs_interval_var.get())
         interval_ms = interval_min * 60 * 1000
         self._rs_schedule_id = self.after(interval_ms, self._rs_schedule_tick)
